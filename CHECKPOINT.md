@@ -1146,3 +1146,45 @@ Diputuskan TIDAK dieksekusi sekarang, DITUNDA sampai next steps aktif yang sudah
 - Nyambung ke ide/catatan terkait yang sudah ada: poin S (QR bawa nama staff + spesifikasi barang, archive bagian 57 lanjutan), Rasa Talent/Penghargaan (bagian 64), ide anti-kecurangan submission/QC (poin R, archive bagian 57 lanjutan) -- perlu direview bareng saat desain final supaya tidak dibangun sebagai 3 fitur terpisah yang mirip.
 
 **Status: LOGIC DAN KEPUTUSAN DESAIN SUDAH DISEPAKATI PENUH (bukan cuma ide mentah). Implementasi kode BELUM dimulai, sengaja ditunda sampai next steps aktif bagian 5 selesai.**
+
+## 168. SERAH-TERIMA KE SESI BERIKUTNYA — Fix robots.txt/noindex rakyat.benangrasa.com + Rencana SEO/GEO (30 Agustus 2026, sesi kena limit di tengah investigasi)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (bug logic ditelusuri sampai akar penyebab sebelum sesi berhenti, bukan dibiarkan tergantung) dan Rasa Grosir (SEO/GEO disiapkan sebagai infrastruktur di depan meski proyek belum siap jual, sesuai prinsip sedia ruang sebelum dibutuhkan).
+
+**KONTEKS:** Teja mau proyek ini punya SEO (Google) dan GEO (Generative Engine Optimization -- biar muncul di jawaban ChatGPT/Google AI Overview) yang bagus di domain FINAL rakyat.benangrasa.com (domain utama benangrasa.com sudah permanen dipakai BTOS/Deka, lihat Bagian 159-160 -- BUKAN karena domain belum pasti, tapi karena PROYEK belum siap jual, domainnya sendiri sudah pasti). Disiapkan dari sekarang meski belum ada tenant nyata/landing page, sesuai Rasa Grosir.
+
+**BUG DITEMUKAN (LOGIC, BELUM DIPERBAIKI, INI PALING PRIORITAS):**
+
+Domain rakyat.benangrasa.com (polos, akan jadi landing page publik ke depan) SAAT INI MASIH DIBLOKIR TOTAL dari Google. Verifikasi: curl -sI https://rakyat.benangrasa.com/ menunjukkan header X-Robots-Tag: noindex, nofollow, dan curl -s https://rakyat.benangrasa.com/robots.txt menunjukkan isi "User-agent: *" diikuti "Disallow: /".
+
+**Root cause 1 -- server.js baris 79-86:** komentar di atas route /robots.txt bilang "server.js ini HANYA pernah menerima request untuk subdomain tenant (demo.*, dst) dan api.* -- domain utama benangrasa.com di-hosting terpisah di Vercel. Jadi Disallow: / di sini SELALU benar tanpa perlu cek subdomain apapun." Komentar ini SUDAH TIDAK VALID sejak migrasi domain Bagian 159 -- asumsi lama "domain utama di Vercel" sudah tidak berlaku. Sekarang rakyat.benangrasa.com POLOS dilayani LANGSUNG oleh server.js ini (bukan lagi cuma subdomain tenant/api), tapi route ini masih balas Disallow: / untuk SEMUA host tanpa kecuali. Kode aktualnya: app.get("/robots.txt", (_req, res) => { res.type("text/plain").send("User-agent: *\nDisallow: /\n"); });
+
+**Root cause 2 -- nginx /etc/nginx/sites-enabled/rakyat.benangrasa.com baris 26:** ada baris add_header X-Robots-Tag "noindex, nofollow" always; yang KE-COPY manual dari config demo/api.benangrasa.com pas setup domain baru (dicatat Bagian 159: "5 security header + X-Robots-Tag noindex sudah disalin sama persis") -- TAPI seharusnya HANYA dicopy ke subdomain tenant (demo.rakyat.benangrasa.com, api.rakyat.benangrasa.com), BUKAN ke domain polos yang justru mau dijadikan landing page utama yang di-index Google.
+
+**YANG PERLU DIBEDAKAN (jangan disamaratakan):** rakyat.benangrasa.com (polos) HARUS diizinkan index (hapus noindex, robots.txt harus allow). demo.rakyat.benangrasa.com dan api.rakyat.benangrasa.com (kerja internal tenant) TETAP noindex (ini SUDAH BENAR sejak Bagian 158/160, JANGAN diubah).
+
+**NEXT STEPS TEKNIS UNTUK SESI BERIKUTNYA (urutan disarankan, command siap pakai):**
+
+Langkah 1 -- cek cara tenantResolver membaca host/subdomain biar kode baru konsisten pola yang sudah ada (Rasa Ketelitian -- cek dependency dulu sebelum nulis kode baru): grep -n "function tenantResolver\|req.hostname\|req.headers.host\|req.get(.host.)" server.js tenantResolver.js 2>/dev/null | head -20
+
+Langkah 2 -- lihat isi lengkap nginx config domain baru untuk tau posisi baris X-Robots-Tag persis: cat -n /etc/nginx/sites-enabled/rakyat.benangrasa.com
+
+Langkah 3 -- perbaiki route /robots.txt di server.js jadi DINAMIS berdasarkan host: kalau host adalah domain polos (rakyat.benangrasa.com tanpa subdomain) balas allow-all (User-agent: * lalu Allow: /), kalau host punya subdomain (demo.*, api.*) balas Disallow: / seperti sekarang. Update juga komentar lama yang sudah tidak valid dengan komentar baru yang menjelaskan perbedaan ini.
+
+Langkah 4 -- hapus baris add_header X-Robots-Tag "noindex, nofollow" always; KHUSUS dari /etc/nginx/sites-enabled/rakyat.benangrasa.com (domain polos) -- JANGAN disentuh di config demo/api (subdomain tetap harus noindex). nginx -t lalu reload setelah edit.
+
+Langkah 5 -- testing wajib sebelum dianggap selesai: curl ke 3 host (rakyat.benangrasa.com, demo.rakyat.benangrasa.com, api.rakyat.benangrasa.com), pastikan CUMA domain polos yang bebas noindex, 2 subdomain lain TETAP ter-block seperti sekarang persis.
+
+Langkah 6 -- setelah fix teknis di atas SELESAI DAN TERUJI, baru lanjut ke rencana SEO/GEO di bawah. JANGAN mulai riset keyword/Search Console dulu selama domain masih ter-block Google -- percuma didaftarkan kalau robots.txt masih menolak crawler.
+
+**RENCANA SEO/GEO (dicatat untuk eksekusi nanti, logic lengkap, target domain rakyat.benangrasa.com):**
+
+SEO klasik: (a) daftarkan rakyat.benangrasa.com ke Google Search Console + verifikasi kepemilikan begitu robots.txt sudah benar, (b) pasang Google Analytics sejak hari pertama landing page live, (c) riset kata kunci Bahasa Indonesia yang relevan ke target audiens pemilik konveksi/pabrik garmen (bukan Inggris) -- contoh arah: "aplikasi manajemen produksi konveksi", "sistem QC jahit online", "software tracking produksi garmen Indonesia", sesuai arah MVP dari cross-check ChatGPT Bagian 163 (order-to-production control), (d) amankan handle media sosial dan Google Business Profile dengan nama produk final, (e) sitemap.xml wajib dibuat dan didaftarkan ke Search Console begitu ada halaman-halaman terstruktur (fitur, FAQ, halaman keamanan) -- ini item yang sebelumnya TERLEWAT di rencana SEO Bagian 158, sitemap penting juga untuk GEO karena membantu crawler AI menemukan seluruh halaman terstruktur.
+
+GEO (Generative Engine Optimization, BEDA dari SEO klasik, target muncul di jawaban ChatGPT/Google AI Overview bukan cuma ranking link): (a) konten harus terstruktur jelas per halaman -- halaman FAQ yang menjawab pertanyaan lengkap mandiri (bukan potongan kalimat), halaman "apa itu [nama produk]" yang gampang di-parsing AI, (b) schema markup JSON-LD tipe SoftwareApplication atau Product untuk halaman produk -- biar Google Rich Results dan AI Overview bisa menampilkan info produk (fitur, deskripsi) langsung di hasil, bukan cuma link biasa, (c) halaman "Keamanan/Kepercayaan" (sudah dicatat Bagian 158, checkpoint sudah punya banyak bukti nyata: HTTPS Grade A+, 2FA, RLS per-tenant, restore drill, PIN lockout) jadi SEMAKIN PENTING untuk GEO karena AI cenderung mengutip halaman yang punya klaim spesifik dan terverifikasi, bukan klaim generik, (d) jawaban lengkap dan mandiri per halaman -- AI lebih suka mengutip halaman yang menjawab pertanyaan secara utuh dalam satu tempat, bukan tersebar di banyak halaman pendek.
+
+Performance/Core Web Vitals: sudah disebut sekilas di Bagian 158 ("perhatikan Core Web Vitals saat memilih framework"), DITEGASKAN LAGI di sini karena penting untuk SEO peringkat Google DAN kecepatan crawl AI -- ini harus jadi pertimbangan SEJAK AWAL desain landing page/frontend (pemilihan framework, optimasi gambar, lazy loading), BUKAN ditambal belakangan setelah frontend selesai dibangun.
+
+Catatan keamanan yang perlu diingat saat landing page dibangun: CSP header saat ini punya connect-src * (sengaja dibuka lebar untuk fitur backendUrl custom di scanner.html, Bagian 156) -- kalau landing page publik dibangun di domain yang sama, WAJIB direview apakah CSP ini masih aman dipakai bersama atau perlu dipisah/diperketat khusus untuk halaman publik, JANGAN asal disamakan dengan config lama tanpa recheck.
+
+**Status: BELUM DIEKSEKUSI SAMA SEKALI (bug ditemukan tapi belum diperbaiki, rencana SEO/GEO baru dicatat). Next steps aktif lain (bagian 5, sudah lebih dulu terbuka) TETAP prioritas mengikuti keputusan Bagian 152/163 -- SEO/GEO ini TIDAK mendesak, dieksekusi kapan saja setelah next steps aktif utama selesai ATAU begitu sesi punya waktu luang untuk fix cepat langkah 1-5 (itu saja yang murah dan cepat, bisa dikerjakan kapan saja tanpa menunggu next steps besar lain).**
