@@ -958,3 +958,36 @@ UFW yang sempat ditemukan inactive kini aktif kembali: default deny incoming, al
 2. Warning NO_PUBKEY 7FCC7D46ACCC4CF8 dari repo PGDG muncul konsisten di beberapa apt update terakhir -- tidak terkait nginx, GPG key PGDG kemungkinan expired, worth diberesin kapan-kapan.
 
 **Status: SELESAI & TERUJI.**
+
+## 162. Setup Repo Checkpoint Terpisah (Public) -- fashion-platform Sekarang Private (30 Agustus 2026)
+
+**Konteks:** Repo utama `fashion-platform` ditemukan masih berstatus **Public** (seharusnya sudah private sejak awal untuk proyek komersial) -- ditemukan tidak sengaja saat Teja mengecek portofolio pribadi di GitHub. Langsung diubah ke **Private**.
+
+**Masalah yang muncul:** Alur kerja lama untuk kasih CHECKPOINT.md ke sesi Claude baru mengandalkan raw.githubusercontent.com link dari repo `fashion-platform` -- ini cuma bisa diakses kalau repo Public. Begitu diubah Private, link raw lama tidak lagi bisa diakses oleh Claude.
+
+**Solusi -- repo checkpoint terpisah:**
+Dibuat repo baru **`fashion-platform-checkpoint`** (Public), isinya HANYA salinan `CHECKPOINT.md` -- tidak ada kode, tidak ada file lain. Repo `fashion-platform` (kode asli + checkpoint asli) tetap Private, tidak pernah diakses publik lagi.
+
+**Analogi untuk diingat:** `fashion-platform` = buku utama (dikunci, cuma Teja yang tulis/edit). `fashion-platform-checkpoint` = fotokopian halaman checkpoint (rak umum, boleh dibaca siapa saja termasuk Claude) -- tidak pernah diedit langsung, cuma di-refresh dari buku utama.
+
+**Verifikasi keamanan sebelum setup ini dianggap selesai:**
+- `git log --all --full-history -- .env` di `fashion-platform` -- KOSONG, `.env` tidak pernah ter-commit sepanjang sejarah repo. Kredensial asli aman meski repo sempat public.
+- Repo `fashion-platform-checkpoint` diverifikasi HANYA berisi CHECKPOINT.md, tidak ada risiko kebocoran kode/kredensial lewat repo ini.
+
+**Alur kerja BARU (menggantikan cara lama memberi link checkpoint ke Claude):**
+
+Alur kerja kode (edit, commit, push ke `fashion-platform`) TIDAK BERUBAH SAMA SEKALI -- tetap seperti biasa, termasuk update isi CHECKPOINT.md di repo itu.
+
+Yang berubah HANYA cara memberi checkpoint ke room Claude baru. Sebelum kasih link ke Claude, jalankan dulu (dari mana saja):
+
+cd ~/fashion-platform && git pull && cp CHECKPOINT.md ~/checkpoint-public/CHECKPOINT.md && cd ~/checkpoint-public && git add CHECKPOINT.md && git commit -m "sync" && git push
+
+Lalu generate link seperti biasa (format sama persis kebiasaan lama, cuma nama repo beda):
+
+cd ~/checkpoint-public && echo "https://raw.githubusercontent.com/teja1945/fashion-platform-checkpoint/$(git log -1 --format=%H -- CHECKPOINT.md)/CHECKPOINT.md" && wc -l CHECKPOINT.md
+
+Link + jumlah baris yang keluar dari command kedua itu yang ditempel ke room Claude baru manapun -- format dan cara pakainya identik seperti sebelumnya, sumbernya saja yang berbeda repo.
+
+**Catatan penting untuk sesi berikutnya:** kalau CHECKPOINT.md di fashion-platform sudah diupdate tapi lupa dijalankan sinkronisasi ke atas, Claude di room baru akan membaca versi checkpoint yang KETINGGALAN (bukan ketinggalan permanen -- cuma belum di-refresh). Selalu jalankan langkah sync ini SETELAH update checkpoint terakhir di sesi, sebelum pindah room/akun.
+
+**Status: SELESAI & TERUJI.** Dicoba end-to-end: sync pertama kali (commit a427892 di fashion-platform-checkpoint) dan sync ulang (nothing to commit, karena isi sudah identik) -- keduanya berjalan sesuai ekspektasi.
