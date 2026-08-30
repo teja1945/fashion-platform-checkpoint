@@ -991,3 +991,40 @@ Link + jumlah baris yang keluar dari command kedua itu yang ditempel ke room Cla
 **Catatan penting untuk sesi berikutnya:** kalau CHECKPOINT.md di fashion-platform sudah diupdate tapi lupa dijalankan sinkronisasi ke atas, Claude di room baru akan membaca versi checkpoint yang KETINGGALAN (bukan ketinggalan permanen -- cuma belum di-refresh). Selalu jalankan langkah sync ini SETELAH update checkpoint terakhir di sesi, sebelum pindah room/akun.
 
 **Status: SELESAI & TERUJI.** Dicoba end-to-end: sync pertama kali (commit a427892 di fashion-platform-checkpoint) dan sync ulang (nothing to commit, karena isi sudah identik) -- keduanya berjalan sesuai ekspektasi.
+
+## 163. Cross-check ChatGPT Kedua -- Audit Supabase Live + Temuan Connector GitHub/Vercel Gagal (30 Agustus 2026)
+
+**Konteks:** Cross-check independen kedua ke ChatGPT (pola sama Bagian 152), dilakukan setelah repo fashion-platform diubah menjadi Private (Bagian 162). ChatGPT punya connector aktif ke Supabase, GitHub, dan Vercel.
+
+**TEMUAN PENTING -- Connector GitHub & Vercel ChatGPT GAGAL akses:**
+ChatGPT mengaku eksplisit dalam laporannya: "Backend/API belum bisa dinilai penuh - Perlu audit source code" dan "Gue coba discovery project Vercel dari koneksi yang tersedia, tetapi listing project gagal." Connector Supabase BERHASIL (audit database live berjalan penuh), tapi connector GitHub dan Vercel gagal -- kemungkinan besar karena fashion-platform sekarang Private (sama seperti masalah yang ditemukan pada Claude di Bagian 162, raw.githubusercontent.com/link publik tidak lagi bisa diakses).
+
+**BELUM DISELESAIKAN -- next steps prioritas:** cari cara agar ChatGPT bisa kembali audit source code (server.js dkk) dan Vercel tanpa membuka kode ke publik. Opsi yang didiskusikan belum final: (a) upload file kode manual ke chat ChatGPT tiap kali audit, (b) buat repo audit terpisah public khusus kode tanpa kredensial (trade-off: kode ter-expose publik, perlu keputusan sadar apakah risikonya diterima), (c) cek apakah ChatGPT punya plugin/connector GitHub yang bisa diberi akses token khusus ke repo private (belum diverifikasi apakah fitur ini tersedia di plan ChatGPT yang dipakai).
+
+**Hasil audit Supabase live (yang BERHASIL diakses ChatGPT):**
+
+Skor dari ChatGPT: konsep produk 8/10, arsitektur multi-tenant 8/10, model production workflow 8/10, inventory 7/10, event/audit architecture 8/10, database structure 7.5/10, security database 8/10 (security advisor 0 lint, RLS aktif di semua tabel yang dicek), database performance 5.5/10. Overall: architecture ~7/10, product readiness ~5-6/10.
+
+**Temuan konkret dari database (32 tabel public dikonfirmasi):**
+1. Banyak foreign key belum punya covering index (contoh: production_events.production_job_id, inventory_ledger.order_id/fabric_inventory_id/created_by_staff_id, work_log.production_job_id/staff_id, job_locks.production_job_id/locked_by_staff_id, payments.order_id, shipments.order_id, order_specs.order_id, order_spec_materials.order_spec_id, dan lainnya). Prioritas MEDIUM sekarang (data masih kecil), HIGH sebelum scale.
+2. Banyak RLS policy kena auth_rls_initplan warning (pola auth.uid() dievaluasi ulang per-row) -- disarankan dibungkus (select auth.uid()) di policy yang relevan. Ini optimisasi performa, BUKAN celah keamanan. Tidak kritis untuk data kecil, penting untuk SaaS multi-tenant skala besar.
+3. Banyak unused index terdeteksi -- SENGAJA JANGAN dihapus sekarang (data masih sangat kecil, contoh: orders ~2 baris, production_jobs ~1 baris -- wajar index belum kepakai). Perlu dibandingkan dengan query pattern + EXPLAIN ANALYZE sebelum keputusan hapus, bukan dihapus asal karena "unused" di advisor.
+
+**Yang ChatGPT puji dari arsitektur:** multi-tenant satu backend dengan shared PostgreSQL + tenant_id (lebih tepat untuk tahap awal SaaS dibanding database terpisah per tenant), event architecture (PostgreSQL append-only + LISTEN/NOTIFY dianggap tepat untuk skala sekarang, Kafka/RabbitMQ akan overengineering), reliability layer sudah dimulai (request_dedup, pending_events, stale_event_log, gap_audit_log sudah ada di schema).
+
+**PERINGATAN PALING PENTING -- "architecture creep":**
+ChatGPT menandai sistem sudah berkembang dari "production management" menjadi "production management + exception management + mediator system + audit/recovery system" -- ini keren secara engineering tapi berisiko secara product development, karena setiap fitur baru menambah lapisan (table, API, authorization, RLS, UI, state machine, testing, edge cases, maintenance) sementara dikerjakan solo. Data production aktual di database masih sangat kecil (orders ~2, production_jobs ~1) dibanding kompleksitas sistem yang sudah dibangun (discrepancy_cases, mediator_backups, mediator_reassignment_log, stage_quantity_submissions, dst).
+
+Kutipan penting dari ChatGPT: "Risiko terbesar sekarang adalah lo menghabiskan waktu membangun mesin yang kompleks sebelum memastikan satu order nyata bisa melewati seluruh sistem tanpa intervensi manual." Target terdekat yang disarankan BUKAN "fiturnya sebanyak apa?" tapi "Bisakah satu order nyata masuk, stok terkunci, diproduksi, setiap tahap tercatat, QC selesai, stok berkurang dengan benar, dikirim, dan seluruh audit trail tetap konsisten ketika terjadi error?"
+
+**Rekomendasi prioritas ChatGPT (P0 -- wajib, urutan disarankan):** authentication, authorization, tenant isolation, order lifecycle, spec lock, inventory reservation, inventory consumption, production state machine, job locking, event consistency, customer approval, shipping completion. P1 (setelah P0 solid): photo evidence, work log, discrepancy handling, notification, realtime, recovery mechanism, audit trail. P2/P3 (ditunda): billing, custom domain, advanced analytics, automation, integrations, AI/predictive/marketplace features.
+
+**3 poin desain konkret yang ditekankan ChatGPT untuk diverifikasi ke source code:**
+1. Inventory harus punya pembedaan jelas antara on_hand/reserved/available/consumed/adjusted/damaged/returned -- bukan sekadar CRUD angka stok, harus jelas aturan sisa material (contoh: reserve 20, consumed 18, sisa 2 -- harus ada aturan eksplisit apa yang terjadi ke sisa itu).
+2. Spec lock harus benar-benar immutable setelah dikunci -- perubahan spec (model/size/measurement/fabric/dst) harus lewat alur change request -> admin review -> customer approval -> versi spec baru, BUKAN update langsung ke row order yang sama.
+3. Production state machine harus divalidasi ketat di backend/database (bukan cuma UI) -- transisi status tidak valid (misal CUTTING langsung ke SHIPPING, atau QC FAIL diperlakukan sama seperti QC PASS) harus ditolak di level server, bukan cuma dicegah lewat tombol UI.
+4. QR code jangan jadi satu-satunya authorization boundary -- harus tetap dikombinasikan dengan staff identity + assigned stage + job lock + server-side authorization, bukan "punya QR = otomatis boleh menyelesaikan job."
+
+**Catatan kritis dari ChatGPT soal scope produk:** disarankan MVP fokus ke satu primary workflow ("order-to-production control untuk bisnis fashion/garmen yang bekerja dengan vendor/tim produksi"), BUKAN mencoba jadi "ERP fashion lengkap" untuk semua tipe tenant (brand owner, vendor konveksi, custom tailor, pabrik, warehouse) sekaligus di tahap ini.
+
+**Status: Audit database live SELESAI (dari sisi Supabase), audit source code/API BELUM BISA DILAKUKAN (connector GitHub/Vercel gagal, kemungkinan besar karena repo sudah Private). Next steps sesi berikutnya: (1) selesaikan cara ChatGPT bisa akses source code lagi, (2) setelah itu lanjutkan audit source-level sesuai kerangka yang ChatGPT tawarkan (PRODUCT/ARCHITECTURE/SECURITY -> WORKFLOW/DATABASE/AUTH, dst), (3) pertimbangkan serius rekomendasi "jangan tambah fitur baru dulu, kunci dulu core flow P0" sebelum lanjut ide-ide besar seperti Dashboard Owner (Bagian 155).**
