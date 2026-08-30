@@ -1,0 +1,960 @@
+>>> WAJIB DIBACA DULU SEBELUM APAPUN LAIN: lihat Bagian 64 "FILOSOFI PRODUK — 9 RASA" di bawah (termasuk Rasa Grosir, Kepemimpinan, Ketelitian — ditambahkan Bagian 88 & 14 Agustus 2026). Semua fitur baru (endpoint, UI, notifikasi, teks, dashboard) WAJIB dicek balik ke 9 Rasa sebelum dianggap selesai. Ini prinsip permanen, bukan sekadar 1 dari banyak ide di checkpoint ini. <<<
+
+CHECKPOINT — Fashion Platform (Multi-Tenant SaaS)
+Update terakhir: 19 Agustus 2026 (split ketiga — arsip Bagian 89-135, security hardening Bagian 136-141)
+
+Cara pakai:
+- File ini isinya STATUS TERKINI + NEXT STEPS AKTIF saja. Histori lengkap:
+  - Bagian 1-53: CHECKPOINT_ARCHIVE.md (dibekukan 8 Agustus 2026)
+  - Bagian 1-88 lengkap (snapshot sebelum diringkas): CHECKPOINT_ARCHIVE_2.md (dibekukan 14 Agustus 2026)
+  - Bagian 89-114: CHECKPOINT_ARCHIVE_3.md (dibekukan 16 Agustus 2026)
+  - Bagian 115-135: CHECKPOINT_ARCHIVE_4.md (dibekukan 19 Agustus 2026)
+  Rujuk nomor bagian di archive terkait kalau butuh detail (root cause bug, command persis, alasan desain).
+- Tiap sesi baru: kasih raw link CHECKPOINT.md ini (format commit SHA) ke Claude sebelum minta lanjut kerja — SEKALIAN kasih output `wc -l CHECKPOINT.md` di pesan yang sama (lihat SOP di bagian Kolaborasi & Cache).
+- Kalau butuh histori detail suatu topik, kasih juga raw link archive yang relevan dengan SHA yang sama.
+- Semua file archive TIDAK PERNAH diedit lagi — cuma dibaca sebagai referensi historis. Semua update selanjutnya HANYA masuk ke CHECKPOINT.md (file ini). Kalau file ini membengkak lagi, lakukan split baru (arsipkan versi lama jadi CHECKPOINT_ARCHIVE_5.md, mulai ringkas lagi).
+
+===================================================================
+1. ARAH PROYEK (ringkas — detail penuh di archive bagian 1-13)
+===================================================================
+- Platform multi-tenant SaaS fashion: brand owner, vendor konveksi, custom tailor, pabrik. 1 backend + 1 database untuk semua tenant, isolasi via tenant_id + RLS (wajib, bukan opsional).
+- Uang customer masuk langsung ke tenant, platform dapat fee (tenant_billing).
+- Frontend beda per tipe tenant (componentized blocks), backend/produksi/inventory sama untuk semua.
+- Basis backend: kode LTOS lama (Termux, single-tenant) digeneralisasi jadi multi-tenant. LTOS sendiri sudah dihentikan operasionalnya, murni jadi basis kode.
+- Constraint pembayaran: tidak ada kartu kredit/debit internasional (cuma BRI/GPN domestik + SeaBank virtual) — ini kenapa VPS Biznet Gio + Supabase dipilih (terima transfer domestik), dan kenapa Claude Code masih tertunda. Detail lengkap di archive bagian 10.
+
+===================================================================
+2. IDENTIFIER KUNCI
+===================================================================
+- Repo GitHub: teja1945/fashion-platform (public)
+- VPS: Biznet Gio, Jakarta, user Rakyat, IP <VPS_IP, lihat CHECKPOINT_LOCAL.md>, Ubuntu 22.04.5 LTS
+- Supabase project (aktif): <SUPABASE_PROJECT_ID, lihat CHECKPOINT_LOCAL.md> — https://<SUPABASE_PROJECT_ID, lihat CHECKPOINT_LOCAL.md>.supabase.co
+- Supabase project lama (LTOS, di-pause): <SUPABASE_PROJECT_ID_LAMA, lihat CHECKPOINT_LOCAL.md> — JANGAN dihapus, ada data historis, RLS sudah aman
+- Demo tenant ID: <DEMO_TENANT_ID, lihat CHECKPOINT_LOCAL.md>, subdomain testing "demo" (host: demo.fashion-platform.local)
+- Demo production job (testing): <DEMO_JOB_ID, lihat CHECKPOINT_LOCAL.md> — sudah dipakai bolak-balik reset ke stage jahit untuk testing berulang, aman dipakai ulang
+- Staff test tenant demo: Admin Demo (role owner, id <ADMIN_DEMO_ID>), Staff Gudang/Cutting/Jahit/QC/Packing(finishing) Demo — semua PIN direset ke nilai yang sama, lihat CHECKPOINT_LOCAL.md untuk id & PIN lengkap
+- Vercel: project fashion-platform terhubung ke repo, auto-deploy dari main, URL https://fashion-platform-six.vercel.app (masih 404, belum ada kode frontend)
+
+===================================================================
+3. STATUS INFRASTRUKTUR — HARDENING DASAR TUNTAS ✅
+===================================================================
+[x] SSH key-only, UFW default-deny (cuma port 22 publik), Fail2Ban aktif, user non-root+sudo, backup pg_dump otomatis harian (retensi 14 hari), pm2+systemd (server.js auto-restart tervalidasi lewat reboot), Node.js 20 LTS.
+
+Belum ada (prioritas berikutnya):
+[x] HTTPS/SSL -- SELESAI (archive bagian 99-100, hardening lanjutan Bagian 138-139: Grade A+ testssl.sh)
+[ ] Rate limiting API level umum (bukan cuma endpoint PIN)
+[x] Restore drill -- SELESAI 19 Agustus 2026, lihat Bagian 142
+
+Detail kronologi: archive bagian 11, 14, 43-46.
+
+===================================================================
+4. STATUS BACKEND — RINGKASAN
+===================================================================
+- Schema v2, semua tabel RLS aktif, role app_user (non-superuser, no bypass RLS).
+- Struktur kolom akurat HANYA bisa diverifikasi via `\d nama_tabel` langsung ke DB — file schema di repo tidak merepresentasikan skema live sepenuhnya.
+- Tenant resolver middleware (subdomain → tenant_id), event-sourcing pipeline (versioning.js, stateLayer.js, ingestion.js) — jalan, tenant-aware.
+- Header/auth: `x-api-key`, `x-staff-token`.
+- MCP terhubung: Supabase & Vercel aktif dari chat Claude.
+- VPS punya akses push ke GitHub via PAT (expired ~awal November 2026 — INGAT perpanjang).
+- Pola wajib akses DB: `withTenant(client, tenantId, fn)` untuk endpoint biasa, `withTenantAndStaff(client, tenantId, staffId, fn)` untuk endpoint yang nyentuh tabel RLS staff-scoped (discrepancy_cases dst) — endpoint yang masih pakai withTenant biasa di tabel staff-scoped akan dapat 0 rows (fail-closed, bukan bug).
+- JANGAN query tabel RLS-protected pakai `pool.query()` langsung di luar transaksi — current_setting bisa dapat koneksi pool "kosong", gagal cast uuid tidak konsisten. Selalu lewat transaksi yang sudah tenant-scoped.
+- Cara verifikasi data manual via psql: RLS tabel utama pakai session variable `app.tenant_id` (BUKAN `app.current_tenant_id`). SET harus digabung dalam satu perintah `-c` yang sama dengan query-nya: `psql "$DATABASE_URL" -c "SET app.tenant_id = '<uuid-tenant>'; SELECT ... ;"`. Tanpa SET ini, semua query balik 0 rows walau data utuh (RLS bekerja sesuai desain, bukan indikasi data hilang). Tabel `tenants` sendiri cuma bisa diakses `service_role`, app_user gak akan pernah bisa SELECT langsung meski context sudah di-SET.
+
+Bug-bug kritis historis (sudah diperbaiki, detail di archive, jangan diulang):
+- orders.production_job_id, sequence_version string-concat bigint, GRANT USAGE schema extensions (archive bagian 35, 36, 39)
+- UUID empty-string broadcast error (archive bagian 80) — root cause: query RLS-protected table via pool.query() di luar transaksi
+
+===================================================================
+5. NEXT STEPS AKTIF
+===================================================================
+[x] Restore drill -- SELESAI 19 Agustus 2026, lihat Bagian 142
+[x] Backup off-site 3-2-1 -- SELESAI 20 Agustus 2026, lihat Bagian 143
+[ ] OWASP ZAP dynamic testing ke tenant demo
+[ ] ClamAV scan upload foto -- DICOBA & DITUNDA 20 Agustus 2026 (VPS RAM tidak cukup), lihat Bagian 148. Syarat lanjut: VPS upgrade ATAU cloud scanning API
+[x] UptimeRobot + Sentry -- SELESAI 20 Agustus 2026, lihat Bagian 144
+[x] Dependency pinning / lockfile audit -- SELESAI 20 Agustus 2026, lihat Bagian 146
+[ ] Draft awal ToS + Privacy Policy
+[ ] 2FA akun kritis (Biznet Gio/Supabase/GitHub/registrar) dari SMS ke app-based
+[x] Tabel tenant_custom_domains -- SELESAI 20 Agustus 2026, lihat Bagian 147
+[ ] Lapis 3 audit keamanan manusia (freelance pentester, sebelum tenant nyata pertama)
+[ ] Mandat eksplisit owner→mediator untuk kasus SERIOUS
+[ ] k6 load testing endpoint confirm
+[ ] Frontend web responsive (item terbesar, belum tersentuh)
+[ ] POST /v1/mediators/:id/backups + /resign, endpoint discrepancy case (reason/eskalasi/resolve), extend trigger_type notifications, tabel tenant_trusted_staff, voice note thread, scanner.html sync ke pipeline final, desain child bundle (BUNDLE_ALLOCATION)
+[ ] Validasi input ketat (zod/joi), audit log admin, monitoring/alerting, enkripsi data sensitif, API_KEY granular, integritas foto bukti
+[x] Sembunyikan stack trace error -- SELESAI 20 Agustus 2026, lihat Bagian 145
+[ ] Selidiki DeprecationWarning "client.query() already executing" di worker/realtime relay (belum ketemu sumber pasti, bukan bug fungsional)
+
+===================================================================
+6. CHECKLIST KEAMANAN — HIDUP, DIREVIEW TIAP ADA FITUR BARU
+===================================================================
+Prinsip: tidak ada sistem 100% aman, target realistis = minimalkan risiko + tahan serangan umum + cepat tahu kalau ada yang aneh.
+
+Sudah ada: RLS semua tabel (termasuk staff-scoped untuk discrepancy_cases & thread), parameterized queries, PIN di-hash pgcrypto, UFW+Fail2Ban, SSH key-only, rate limiting brute-force PIN, pesan error login tidak bocorkan validitas staff_id, backup rutin, insert-only enforced di level DB untuk thread_messages/photos (REVOKE UPDATE/DELETE dari app_user).
+
+Belum ada (perlu direview ke depan):
+[ ] Rate limiting API level umum
+[x] HTTPS/SSL -- SELESAI, lihat Bagian 138-139
+[ ] Validasi input lebih ketat di semua endpoint
+[ ] Audit log admin actions terpisah dari production_events (force-unlock, revoke staff, eskalasi manual)
+[ ] Monitoring/alerting otomatis (login gagal beruntun, pola akses aneh)
+[ ] Enkripsi data sensitif tambahan — SEKARANG CAKUPANNYA: nomor telepon/alamat customer, DAN phone_number staff (plaintext, konsisten sama customer_contact) — review bareng semua field sensitif ini sekaligus, bukan ditambal satu-satu
+[ ] Rate limiter & session in-memory masih single-instance — perlu Redis kalau nanti multi-instance
+[ ] API_KEY tunggal untuk semua endpoint — pertimbangkan granular per tenant
+[ ] Integritas foto bukti — EXIF timestamp vs waktu submission, perceptual hash (bisa 1 modul sama buat production_stage_photos & discrepancy_thread_photos, keduanya simpan storage_path)
+[x] Restore drill -- SELESAI 19 Agustus 2026, lihat Bagian 142
+
+Prinsip wajib untuk fitur self-service baru: selalu tanya "kalau disalahgunakan, dampaknya sejauh mana?" — dan tenant/staff TIDAK PERNAH dikasih akses ke infrastruktur/kredensial Teja dalam bentuk apapun.
+
+ATURAN WAJIB (13 Agustus 2026): sebelum nulis kode baru yang manggil fungsi/helper yang sudah ada di codebase, WAJIB grep/lihat dulu definisi fungsi itu — bukan cuma nebak dari endpoint lain yang polanya mirip. Verifikasi dependency itu langkah PERTAMA.
+
+ATURAN WAJIB (13 Agustus 2026): sebelum bikin endpoint baru yang melibatkan otorisasi staff, WAJIB cek dulu pola otorisasi serupa yang sudah ada di checkpoint (misal: call_log & summon-owner cuma boleh mediator, bukan "semua pihak terlibat") — bukan cuma niru pola generik.
+
+ATURAN WAJIB (kalau ada perubahan nilai enum-like di kolom otorisasi seperti role/status): WAJIB grep semua tempat yang cek nilai lama itu secara hardcode sebelum migration dianggap selesai — migration skema doang TIDAK CUKUP.
+
+ATURAN WAJIB (14 Agustus 2026, Rasa Ketelitian): tiap kali nulis judul bagian baru "SELESAI & TERUJI" di CHECKPOINT.md, WAJIB eksplisit sebutin rasa mana yang diterapkan + wujud konkretnya di fitur itu — bukan cuma klaim umum "sudah dicek 9 rasa" tanpa detail. Tujuannya biar kelihatan jelas di histori, gampang diaudit balik kalau ternyata ada yang kelewat.
+
+===================================================================
+7. IDE-IDE BELUM DIRISET MATANG (belum keputusan final, jangan mulai coding sebelum next steps aktif selesai)
+===================================================================
+Daftar ringkas — detail lengkap tiap ide ada di archive pada nomor bagian yang disebut:
+
+A. Visual configurator tenant konveksi — archive bagian 25
+B. QR code dual-jalur customer vs produksi — archive bagian 26
+C. Verifikasi 2 pihak staff jahit vs QC + notif WA ke QC — SEBAGIAN BESAR SUDAH DIEKSEKUSI (lihat bagian 57, 61, 71-87 di archive 2), sisanya jadi next steps aktif di atas
+D. Tenant theme settings + Pattern library & multi-format export — archive bagian 47
+E. Tenant kaos: sablon 3D + upload gambar sendiri — archive bagian 48
+F. Sistem upah staff jahit (borongan per pcs) — archive bagian 49
+G. Dashboard analytics owner, ruang komplain customer, sistem sewa modular per fitur — archive bagian 50
+H. Login email+password + kustomisasi dashboard personal — archive bagian 51
+I. 2FA login + subdomain custom pilihan tenant — archive bagian 53
+J. Automation "AI mikir + AI eksekusi" — archive bagian 28
+K. Adopsi BTOS: visual mannequin 3D, decision center actionable, sewa modular "akses vs pemakaian", entry point trial — archive bagian 67
+L. Hardening internal: restore drill, integritas foto, audit log admin, offline-first scanner, skor supplier — archive bagian 68 (restore drill & integritas foto sudah masuk checklist keamanan di atas)
+M. Gudang final terhubung ke lokasi rak & data siap kirim — archive bagian 69
+N. Adopsi BTOS lanjutan: Resume Don't Recreate, antrian real-time walk-in, AI Vision Judge — archive bagian 70
+O. Struktur organisasi pabrik fleksibel: level jabatan, PPIC, QC independen, HRD, shift — archive bagian 77 (diperluas jadi peta besar di bagian 88 di bawah)
+P. i18n multi-bahasa per tenant (UI + data yang tenant input sendiri) — dicatat 9 Agustus, belum diriset
+Q. Custom nada dering notifikasi per jenis (in-app) — dicatat 9 Agustus, belum diriset
+R. Anti-kecurangan submission/QC (kolusi 2 pihak): foto wajib, silang-cek qty vs bahan terpakai, deteksi pola "terlalu mulus", rotasi pasangan kerja — archive bagian 57 lanjutan
+S. QR kode detail bawa nama staff + spesifikasi barang (kredit kerja, anti-kecurangan) — archive bagian 57 lanjutan
+T. Dashboard "barang selesai siap kirim" — archive bagian 57, 69
+U. Diskusi gudang di awal siklus untuk kain cacat/reject — archive bagian 58, lihat juga ringkasan Lapis 2 bagian 9 di bawah
+V. Manajemen supplier (tabel suppliers, evaluasi performa, formula skor) — archive bagian 59, 68 poin 5
+W. Tipe bayaran staff fleksibel per tenant: harian/piece-rate/bulanan — archive bagian 62
+X. Absensi & lembur anti-kecurangan via HP (WebAuthn, geofencing, selfie, timestamp server) — archive bagian 63
+Y. AI Copywriter (generate caption/deskripsi produk) & AI Admin Sales/CS Chatbot — archive bagian 65
+Z. Roadmap ekspansi modul pelengkap dari LTOS: Customer Journey Portal, Decision Center, Master Data Center, Quotation Engine, Customer Digital Profile, Appointment Scheduling, Fitter App, AI Render Preview — archive bagian 66
+AA. Darurat staff di tengah pekerjaan (Lapor Darurat, QR multi-scan, split upah manual) — lihat ringkasan bagian 9 di bawah, desain lengkap archive bagian 73
+AB. Modul Laporan/Rekapan Owner "di balik layar" (keuangan, produk, kemajuan, kegagalan, peningkatan) — archive bagian 94
+AC. Login email+password + approval owner + kustomisasi dashboard personal — archive bagian 51
+AD. 2FA staff + subdomain custom pilihan tenant sendiri saat onboarding — archive bagian 53
+
+===================================================================
+8. TOOL DEVELOPMENT — STATUS
+===================================================================
+- Claude Code: ditunda (bukan ditolak), kebentur constraint pembayaran (bagian 1). Sudah dicoba langsung di VPS, sukses sampai step login, gagal di situ. Eksplorasi Google Play billing (GoPay/ShopeePay/Google Play balance/vouchers domestik) sebagai alternatif — status BELUM DIEKSEKUSI, terakhir dicek beberapa hari lalu.
+- MCP (Supabase, Vercel): aktif dan dipakai rutin dari chat Claude.
+- Detail percobaan lengkap: archive bagian 16, 28.
+
+===================================================================
+9. RINGKASAN SKEMA TABEL AKTIF (Lapis 2 — sistem mediator & diskusi discrepancy)
+===================================================================
+Ringkasan struktur — detail migration & keputusan desain lengkap ada di archive bagian 74-88.
+
+tenant_mediators: id, tenant_id, staff_id, line_scope (nullable, general kalau kosong), has_full_mandate (default false, TIDAK otomatis pindah ke cadangan), is_active, assigned_by, created_at, updated_at. UNIQUE(tenant_id, staff_id) — staff gak bisa didaftarkan dobel jadi mediator.
+
+mediator_backups: mediator_id, backup_staff_id, priority_order (1 = dicoba duluan). UNIQUE(mediator_id, priority_order), UNIQUE(mediator_id, backup_staff_id). Cadangan WAJIB sudah jadi tenant_mediators resmi duluan (disediakan di depan pas ditunjuk, bukan otomatis pas resign — lihat archive bagian 87).
+
+discrepancy_cases: id, tenant_id, stage_quantity_submission_id (FK, UNIQUE — 1 submission = 1 kasus), production_job_id, submitter_staff_id, receiver_staff_id, mediator_id (nullable — bisa kosong kalau tidak ada mediator aktif, lihat fallback escalated_to_admin di archive bagian 82), status (OPEN/IN_DISCUSSION/RESOLVED/ESCALATED_TO_OWNER), severity (NORMAL/SERIOUS, default NORMAL), resolution_notes, submitter_confirmed_at, receiver_confirmed_at, resolved_by_staff_id, resolved_at, resolved_with_mandate. RLS staff-scoped (bukan cuma tenant-isolation) — akses cuma submitter/receiver/mediator/owner, fail-closed kalau app.staff_id kosong.
+
+discrepancy_thread_messages: id, tenant_id, discrepancy_case_id, sender_staff_id (nullable untuk row otomatis sistem), message_type (text/photo/call_log/mediator_action/correction), action_subtype (khusus mediator_action: joined_case/summoned_owner), content, call_to_staff_id, target_staff_id, corrects_message_id (self-FK, untuk ralat tanpa hapus riwayat). INSERT-ONLY di level DB (REVOKE UPDATE/DELETE). call_log CUMA boleh ditulis mediator.
+
+discrepancy_thread_photos: id, tenant_id, message_id (FK), storage_path, uploaded_by_staff_id, uploaded_at. Generic, tidak terikat stage produksi (beda dari production_stage_photos). INSERT-ONLY.
+
+mediator_reassignment_log: id, tenant_id, discrepancy_case_id, old_mediator_id (nullable), new_mediator_id, reason, triggered_by_staff_id, created_at. Jejak permanen perpindahan mediator (belum ada endpoint yang insert ke sini — nunggu logic resign, next steps bagian 5).
+
+notifications: generic, trigger_type-based, related_staff_id (FK staff — "tujuan hubungin balik" via WA, nomor mentah bukan link jadi), RLS insert-scoped via submitter/receiver/mediator/owner. Baru cover trigger_type discrepancy_summoned_owner — jenis lain (stok kosong, darurat staff, mesin rusak) masih next steps aktif.
+
+reserve_fabric_inventory(...) — function DB (bukan tabel), atomik reserve stok kain + ledger, row-lock FOR UPDATE, SECURITY INVOKER. Dipakai saat order masuk produksi butuh bahan. Trigger utama buat laporan stok kosong (ide U/bagian 72) dan disebut sebagai nilai jual audit ekspor (Modul G, bagian 88).
+
+===================================================================
+88. PETA BESAR STRUKTUR PABRIK GARMEN (14 Agustus 2026, riset/rencana, belum diimplementasi — dipertahankan utuh, bukan diringkas, karena jadi peta acuan jangka panjang)
+===================================================================
+Latar belakang: proyek diarahkan juga bisa ditawarkan ke pabrik skala penuh, bukan cuma konveksi kecil.
+
+FILOSOFI KE-7 — "RASA GROSIR": platform sedia ruang dan kebutuhan sebanyak mungkin di depan (grosir/wholesale), semaksimal mungkin sebelum dibutuhkan — bukan tambal satu-satu pas kepepet. Tenant tinggal aktifkan fitur yang relevan. Sudah dipraktikkan di bagian 87 (cadangan mediator disiapkan di depan, bukan "naik jabatan" mendadak).
+
+ALUR PRODUKSI LENGKAP: Sales/Merchandising → Costing → Desain → CAD/Pattern → Sampel → ACC Buyer → Purchasing → Cutting → Jahit (sub-stage custom) → QC → Finishing (sub-stage custom) → QC akhir → Gudang barang jadi → Pengiriman → Retur/Komplain
+
+MODUL A — Alur Produksi Utama (linear, jantung sistem). Implikasi teknis terbesar: stage jahit & finishing perlu 2 LEVEL (stage utama → sub-stage custom per tenant), perluasan pola modular bagian 61/66.
+MODUL B — PPIC: visibility lintas semua production_jobs, pantau gap_status/deadline.
+MODUL C — Industrial Engineering: waktu standar, kapasitas line. Opsional, referensi doang.
+MODUL D — Finance: invoice buyer, bayar supplier, payroll, refund retur. Nyambung ke Modul A di titik trigger saja.
+MODUL E — HRD: rekrutmen, pelatihan, performa, absensi. Terpisah total dari Modul A.
+MODUL F — Maintenance/Teknisi: "lapor mesin rusak" → notifikasi teknisi, pakai pola tabel notifications yang sudah ada (extend trigger_type, bukan bangun dari nol).
+MODUL G — Compliance/Audit (fitur laporan, bukan modul aktif): audit trail yang sudah dibangun dari awal (event-sourcing, mediator_reassignment_log, production_events) = NILAI JUAL untuk pabrik ekspor (USTR dkk), tinggal export dari data yang sudah ada.
+MODUL H — Subkontraktor: field assigned_to_type (internal/vendor-eksternal) di sub-stage.
+MODUL I — Database Buyer/Customer: pertimbangkan tabel customers/buyers terpisah untuk buyer berulang (ekspor) — belum diputuskan.
+MODUL J — Retur/Komplain: alur sekarang berhenti di "Pengiriman", belum ada tempat retur — masuk Modul D atau modul sendiri, belum diputuskan.
+
+TIDAK PERLU masuk sistem: Marketing (di luar siklus operasional), GA/Safety/Environment (administratif fisik).
+
+HIERARKI LAPANGAN: Operator → Leader (pimpin 1 line) → Foreman (koordinasi beberapa line) → Supervisor (operasional harian, target, kualitas). Leader/Supervisor kandidat alami buat mediator/backup (bagian 74-87).
+
+STATUS: peta/riset, belum ada tabel/kode diimplementasi. Prioritas eksekusi TETAP ngikutin next steps aktif (bagian 5) — ini peta acuan jangka panjang, bukan next step langsung.
+
+===================================================================
+64. FILOSOFI PRODUK — 9 RASA — Wajib Diterapkan Nyata di Setiap Langkah
+===================================================================
+Status: PRINSIP PERMANEN. Berlaku untuk SEMUA pengembangan ke depan, dicek di setiap step — harus kelihatan wujud nyatanya di kode/UI/teks, bukan cuma diingat.
+
+Platform TIDAK punya departemen marketing, sales, copywriter, atau CS secara langsung — tapi setiap sudut platform harus TERASA seolah-olah ada 9 "rasa" ini:
+
+1. Rasa Copywriting — cara platform "ngomong". Teks (notifikasi, tombol, error) ditulis kaya manusia ngomong, bukan "Error: submission failed" tapi "Waduh, gagal kekirim. Coba cek koneksi lo dan ulangi ya."
+
+2. Rasa Sales — cara platform bikin orang PERCAYA. Dashboard nunjukin bukti nyata kejujuran sistem — riwayat lengkap barang, foto bukti kelihatan langsung.
+
+3. Rasa Marketing — cara platform nunjukkin dirinya. Gaya bahasa/visual konsisten, data ditampilkan sebagai cerita/progress (dashboard "barang siap kirim"), bukan tabel angka mentah.
+
+4. Rasa Talent/Penghargaan — cara platform menghargai orang di baliknya. QR kode bawa nama staff pengerjanya, ditampilin sebagai kredit kerja (bukan cuma anti-kecurangan).
+
+5. Rasa Customer Service — cara platform bantu orang PAS ADA MASALAH. Error kasih tau langkah selanjutnya. Fitur membingungkan dikasih penjelasan singkat di tempat. Ada jalan jelas buat benerin kesalahan manusia.
+
+6. Rasa Keamanan — cara platform JAGA kepercayaan orang di dalamnya. Jejak tidak bisa dihapus/ditimpa diam-diam (event, bukan field yang diganti tanpa bekas — koreksi = catatan baru). Otorisasi jelas siapa boleh apa. Tidak ada "setengah jalan" (atomic). Data sensitif diperlakukan hati-hati. Transparan ke yang berhak, tertutup ke yang tidak.
+
+7. Rasa Grosir — cara platform SEDIAKAN RUANG DI DEPAN (ditambahkan 14 Agustus 2026, bagian 88). Sedia kapasitas/fitur semaksimal mungkin sebelum dibutuhkan, tenant tinggal aktifkan yang relevan — bukan tambal satu-satu pas kepepet.
+
+8. Rasa Kepemimpinan — sosok yang menyambungkan semua rasa jadi satu kesatuan (ditambahkan 14 Agustus 2026). LEVEL UTAMA: cara Claude/Teja ngerjain kerjaan dengan 1 visi yang nyambung, bukan mutusin per fitur sendiri-sendiri. Kalau level ini gak jalan, rasa lain bisa kepasang tapi gak nyambung satu sama lain (contoh nyata kejadian pas level ini gak ada: 5 titik otorisasi hardcode role="admin" lupa di-update pas role owner ditambah, archive bagian 76). LEVEL TURUNAN: ada sosok/role yang jadi "pemimpin" nyata di tiap fitur — mediator jadi pemimpin di kasus discrepancy, owner jadi pemimpin di tingkat tenant, gudang jadi "pemimpin siklus" (buka & tutup siklus produksi, bagian 57).
+
+9. Rasa Ketelitian — cara platform gak pernah asal, selalu dicek ulang sebelum dianggap kelar (ditambahkan 14 Agustus 2026). Sudah dipraktikkan lewat aturan-aturan wajib yang ada (cek dependency sebelum nulis kode, cek pola otorisasi sebelum bikin endpoint baru, grep semua tempat kena kalau ubah enum) — sekarang diresmikan jadi rasa, bukan cuma "aturan teknis" terpisah. Termasuk: testing tiap skenario (bukan cuma happy path), baca ulang checkpoint penuh sebelum lanjut kerja.
+
+SIFAT & CARA EKSEKUSI: filosofi ini BUKAN dokumen final, tapi wadah belajar dua arah — Teja belajar dunia marketing/sales/CS/copywriting dari luar DAN dari eksekusi platform ini sendiri. Cara eksekusi (WAJIB): setiap kali Claude mengerjakan sesuatu yang menyentuh salah satu rasa — nulis teks, bikin tampilan, desain alur — BENERAN MASUK ke cara mikir peran itu, bukan nempelin filosofi sebagai label.
+
+ATURAN WAJIB: setiap kali mengerjakan fitur baru (endpoint, UI, notifikasi, dashboard, pesan error, apapun) — cek balik ke 9 filosofi ini SEBELUM dianggap selesai. Tidak harus semua 9 diterapkan sekaligus di 1 fitur, minimal 1-2 yang kelihatan wujud nyatanya. Wajib disebutkan eksplisit rasa mana + wujud konkretnya di judul bagian "SELESAI & TERUJI" (lihat aturan Rasa Ketelitian di checklist keamanan bagian 6).
+
+CATATAN PENERAPAN KE KODE LAMA: wajib untuk kerjaan baru mulai sekarang. Kode/teks/UI lama TIDAK perlu dirombak buru-buru — masuk daftar "polish pass" belakangan.
+
+===================================================================
+CARA MENCATAT IDE BARU — INSTRUKSI UNTUK SEMUA ROOM/SESI
+===================================================================
+Kalau Teja menyampaikan ide baru di sesi manapun, room manapun WAJIB ikuti pola ini:
+
+1. Tulis ide itu sebagai BAGIAN BARU BERNOMOR (nomor lanjut dari bagian terakhir — cek dulu nomor bagian tertinggi, JANGAN tebak/asal nomor. Nomor tertinggi saat ini: 88).
+2. Judul bagian: "[NOMOR]. Ide Awal — [nama ide singkat] ([tanggal], BELUM DIRISET MATANG)"
+3. Isi selengkap mungkin dari hasil diskusi — TIDAK perlu diringkas saat pertama dicatat.
+4. Tulis draft-nya, tunjukkan ke Teja untuk direview.
+5. Setelah disetujui, APPEND (bukan overwrite) ke CHECKPOINT.md via `cat >> CHECKPOINT.md << 'EOF' ... EOF` di VPS, verifikasi dengan `tail`, baru commit & push.
+6. TAMBAHKAN JUGA satu baris ringkasan ide itu ke daftar bagian 7 di atas.
+7. JANGAN taruh ide baru ke file archive manapun — sudah dibekukan permanen.
+8. Kalau CHECKPOINT.md ini sendiri sudah mulai kepanjangan lagi — usulkan split baru ke Teja, jangan diam-diam dibiarkan membengkak.
+
+===================================================================
+KOLABORASI & CACHE — WAJIB DIBACA TIAP SESI BARU
+===================================================================
+- Repo public, satu sumber kebenaran untuk semua room/sesi Claude. Commit langsung ke main (belum pakai branch, solo dev fase aktif).
+- MASALAH CACHE raw.githubusercontent.com: query string ?t= TIDAK CUKUP. WAJIB pakai commit SHA di path URL — commit SHA didapat dari `git log -1 --oneline -- CHECKPOINT.md` di VPS.
+- SOP WAJIB (ditambahkan 14 Agustus 2026, dari insiden nyata fetch kepotong): setiap kasih raw link CHECKPOINT.md ke Claude sesi baru, SEKALIAN kasih output `wc -l CHECKPOINT.md` di pesan yang sama. Kalau Claude menyebut bagian terakhir yang dia baca dengan nomor JAUH lebih kecil dari yang seharusnya (cek dulu bagian terakhir yang ditulis) — JANGAN percaya itu sudah lengkap, langsung minta `tail -c 20000 CHECKPOINT.md` (atau `sed -n 'START,ENDp'` kalau tahu range baris pastinya) tanpa berdebat dulu. Ini BUKAN soal cache, murni limitasi ekstraksi tool fetch Claude sendiri, TERBUKTI nyata (kejadian 14 Agustus 2026).
+- Room paralel bisa hasilkan kontradiksi kalau nulis bagian sama bersamaan. Kalau nemu info meragukan, JANGAN percaya salah satu versi — verifikasi ke sumber asli (database, file di server).
+- SELALU `git pull` sebelum mulai edit/append file apapun yang bakal di-push — VPS punya akses push (PAT), risiko tabrakan lebih tinggi.
+- SELALU `git log --oneline -10` di awal sesi sebelum mulai menulis file yang berpotensi sudah dikerjakan room lain.
+- Cara edit/append file di VPS: `cat >> nama_file << 'EOF' ... EOF` untuk NAMBAH (bukan nano). `>>` = append, `>` = overwrite total. Verifikasi dengan `tail -N nama_file` setelah append, sebelum commit & push.
+- Cross-check ke ChatGPT: rekomendasikan proaktif kalau ada keputusan desain berisiko tinggi (arsitektur data, security, race condition, konsistensi) — jangan nunggu Teja minta duluan. Evaluasi jujur hasilnya.
+- Workflow Teja: satu-langkah-satu-waktu. Claude kasih 1 command/langkah, tunggu hasil dari Teja, baru lanjut ke langkah berikutnya. Jangan kasih banyak command sekaligus.
+- KLARIFIKASI POLA PEMAKAIAN (17 Agustus 2026): 4 akun Claude yang dipakai
+  Teja jalan BERGANTIAN saat kena limit, BUKAN paralel bersamaan -- risiko
+  konflik/kontradiksi di atas jauh lebih rendah untuk pola ini. Tetap wajib:
+  (a) push ke GitHub SEBELUM pindah akun, commit progress kecil-kecil kalau
+  memungkinkan (jangan nunggu semua kelar baru commit), (b) kalau kena limit
+  di tengah kerjaan yang belum selesai/belum ditest, sempetin catat status
+  "SERAH-TERIMA KE SESI BERIKUTNYA" dulu (pola yang sudah dipakai Bagian
+  121/125) sebelum akun itu gak bisa diakses lagi.
+
+===================================================================
+ATURAN WAJIB (14 Agustus 2026): jelasin pakai bahasa sederhana dari awal
+===================================================================
+Tiap kali ada keputusan desain yang perlu persetujuan Teja (pilihan A vs B,
+dst), jelasin PAKAI CONTOH KONKRET/SKENARIO NYATA duluan -- bukan istilah
+teknis dulu baru disederhanain belakangan pas ditanya. Anggap tiap
+pertanyaan itu kayak ngejelasin ke orang yang baru pertama denger konsepnya,
+bukan ke sesama developer. Ini berlaku di SEMUA room/sesi Claude ke depan,
+bukan cuma sesi ini -- ditemukan dari pola berulang kali Teja perlu minta
+"sederhanain" sebelum bisa jawab.
+
+[Bagian 89-114 diarsipkan 16 Agustus 2026 -- lihat CHECKPOINT_ARCHIVE_3.md untuk detail lengkap: alur Stitch/Figma/v0, 4 endpoint discrepancy, audit ChatGPT 15 temuan, checkGaps fix, HTTPS/SSL setup, foto wajib, CodeQL+Dependabot, rate limiter global, P0-1/P0-2/P0-3, P1-2/P1-4/P1-5]
+
+[Bagian 115-135 diarsipkan -- lihat CHECKPOINT_ARCHIVE_4.md untuk histori lengkap (WS auth token, tenant isolation testing, CORS, migrasi Redis, ide-ide 127-135)]
+
+## 136. Eksekusi Tingkat 1 Bagian 127: npm audit + gitleaks -- SELESAI & TERUJI (19 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (setelah 2 hari beruntun cuma
+ngumpulin ide/rencana tanpa eksekusi -- Bagian 127-135 -- sesi ini sengaja
+berhenti nulis ide baru dan ambil 1 item paling murah dari backlog sampai
+tuntas dicoba, bukan didiskusikan lagi).
+
+**Konteks:** item Tingkat 1 dari daftar 11 tools security Bagian 127
+(instant, gak perlu install berat) -- dieksekusi langsung, bukan sekadar
+direncanakan.
+
+**Hasil:**
+- `npm audit` di ~/fashion-platform -> 0 vulnerabilities.
+- gitleaks v8.30.1 (binary langsung dari GitHub releases, bukan lewat
+  package manager) -> `gitleaks git .` scan 185 commit, ~1.27 MB -> 0 leaks
+  found. Menjawab langsung kekhawatiran Bagian 127 soal API key yang
+  beberapa kali dipegang di terminal sepanjang sesi kerja -- terbukti
+  tidak ada yang ke-commit ke git history.
+
+**Kendala teknis kecil:** URL `releases/latest/download/gitleaks_8.21.2_...`
+404 karena nomor versi di URL manual sudah basi (redirect ke v8.30.1 tapi
+nama file tetap pakai versi lama) -- diperbaiki dengan cek nama asset yang
+benar dulu (`gitleaks_8.30.1_linux_x64.tar.gz`) sebelum retry.
+
+**File sementara sudah dibersihkan** (gitleaks.tar.gz, gitleaks-report.json)
+setelah dikonfirmasi hasilnya. Binary `~/gitleaks` dibiarkan terpasang di
+VPS untuk dipakai ulang nanti (Bagian 135: rencana pentest berkala).
+
+**Status: 2 dari 2 item Tingkat 1 Bagian 127 SELESAI & TERUJI, 0 temuan
+di keduanya.** Dicoret dari daftar Tingkat 1 -- lanjut ke Tingkat 2
+(unattended-upgrades, eslint-plugin-security, Lynis, testssl.sh) atau item
+lain sesuai prioritas Teja di sesi berikutnya.
+
+**Next steps aktif tetap seperti Bagian 126 (belum tersentuh):**
+[ ] Polish pass 13 titik pesan "internal error" generic
+[ ] P0-6 -- schema/migration reproducibility
+[ ] PIN progressive lockout
+[ ] Test suite CI gate
+[ ] #16/#17 Bagian 119 -- audit trail admin & monitoring
+
+## 137. Eksekusi lanjutan: SWAP, PM2 memory limit, unattended-upgrades auto-reboot -- SELESAI & TERUJI (19 Agustus 2026)
+
+**Konteks:** melanjutkan Bagian 136 di sesi yang sama.
+
+### 3. SWAP 2GB -- SELESAI & TERUJI
+Dibuat swapfile 2GB (rule 2x RAM, RAM aktual ~957Mi): fallocate + chmod 600 + mkswap + swapon + tambah ke /etc/fstab. Testing: swapoff+swapon -a (simulasi baca fstab) -> swap 2.0Gi balik aktif tanpa reboot beneran. LULUS.
+
+### 4. PM2 max_memory_restart 500M -- SELESAI & TERUJI
+Dibuat ecosystem.config.js (baru, commit ke repo). max_memory_restart 500M dipilih karena heap usage aktual cuma ~19MB (25x headroom). pm2 delete + start ecosystem.config.js + save. Testing: pm2 show konfirmasi 524288000 bytes, curl localhost:3000 -> 404 (hidup normal). Commit 97f8c0a.
+
+### 5. unattended-upgrades auto-reboot -- SELESAI & TERUJI
+Ditemukan sudah aktif dari default Ubuntu 22.04 (bukan setup manual), log konfirmasi auto-patch jalan nyata. Yang belum aktif: Automatic-Reboot. Verifikasi dulu: timezone WIB (aman jam 02:00 bukan jam kerja), redis-server enabled (auto-start abis reboot), tidak ada reboot pending sekarang. Diaktifkan: Automatic-Reboot true, waktu 02:00. Testing: dry-run --debug config valid.
+
+**Next: lanjut Bagian 138 untuk temuan Lynis (Redis/SSL/SSH hardening).**
+
+## 138. Lynis audit + hardening Redis, SSL/TLS nginx, SSH -- SELESAI & TERUJI (19 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (setelah 2 hari Bagian 127-135 cuma ngumpulin ide tanpa eksekusi, sesi ini disiplin tuntasin item demi item sampai dites & commit) dan Rasa Keamanan (3 celah nyata ditutup: Redis tanpa password, TLS lemah, SSH tanpa batas percobaan).
+
+lynis v3.0.7 diinstall, sudo lynis audit system dijalankan. Hasil: Hardening index 65/100, 0 warnings, 54 suggestions. 3 dipilih untuk dieksekusi sekarang (relevan langsung ke stack aktif), 51 sisanya ditunda dengan alasan konkret per kategori (butuh reformat disk, resiko kekunci akses, overhead VPS 1 core/1GB) -- bukan ditunda tanpa alasan.
+
+### Redis requirepass + rename-command CONFIG
+Password digenerate (openssl rand -base64 32), disimpan REDIS_PASSWORD di .env (gitignored, permission 600). redis.conf baris 790 diisi requirepass. sessionStore.js dan rateLimiter.js ditambah password: process.env.REDIS_PASSWORD (commit f9a9680).
+
+Urutan restart WAJIB: (1) pm2 restart --update-env DULU (load password ke kode selagi Redis belum requirepass), BARU (2) systemctl restart redis-server. Kalau kebalik, staff logout paksa massal.
+
+rename-command CONFIG juga ditambahkan (openssl rand -hex 16 buat nama baru), baris baru ditambah di redis.conf baris 807 (tidak menimpa contoh asli).
+
+Testing semua LULUS: login staff sebelum restart Redis berhasil (kode baru jalan) -> redis-cli GET konfirmasi data tersimpan -> restart Redis -> ping tanpa auth -> NOAUTH -> login lagi setelah restart -> berhasil (PM2 reconnect pakai password benar) -> CONFIG GET dengan auth benar -> unknown command (rename berhasil).
+
+Kendala kecil: test login pakai field subdomain di body salah, tenant resolve lewat Host header. Format benar: curl -H "Host: demo.fashion-platform.local" -H "x-api-key: <dari .env>" -d staff_id+pin ke /v1/staff/login.
+
+### SSL/TLS nginx hardening
+nginx.conf baris 32: ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3 diganti jadi cuma TLSv1.2 TLSv1.3 (TLSv1/1.1 deprecated sejak 2020). Ditambah ssl_ciphers eksplisit modern. Testing: nginx -t OK, reload (bukan restart), curl https biasa -> 404 normal, curl --tlsv1.1 --tls-max 1.1 -> 000 (ditolak, terbukti).
+
+### SSH hardening
+sshd_config 4 baris diubah: MaxAuthTries 6->3, AllowAgentForwarding yes->no, X11Forwarding yes->no, Compression delayed->no. SENGAJA TIDAK ganti port SSH default -- resiko kekunci akses, manfaat cuma obscurity, Fail2Ban sudah lebih substantif. Testing: sshd -t OK, reload ssh, koneksi terminal tetap hidup.
+
+**Status akhir sesi: 7 dari 7 item Tingkat 1/2 (Bagian 136+137+138) dieksekusi TUNTAS, bukan cuma direncanakan. Semua di-test dengan bukti konkret, commit terpisah (97f8c0a, f9a9680).**
+
+**Pelajaran penting:** pola 2 hari Bagian 127-135 murni ngumpulin ide tanpa eksekusi, dikoreksi eksplisit oleh Teja di tengah sesi ini. Perbaikan bukan "kerjain semua 54 saran Lynis sekaligus", tapi triase jujur: yang murah+relevan dieksekusi sekarang, sisanya ditunda dengan alasan konkret.
+
+**Next steps aktif (belum berubah dari Bagian 126, 3 item Lynis dicoret dari 51 sisa Bagian 127/133):**
+[ ] Polish pass 13 titik pesan "internal error" generic
+[ ] P0-6 -- schema/migration reproducibility
+[ ] PIN progressive lockout
+[ ] Test suite CI gate
+[ ] #16/#17 Bagian 119 -- audit trail admin & monitoring
+[ ] 51 saran Lynis sisanya (Tingkat 2+ Bagian 127/133) -- menyusul, bukan mendesak
+
+## 139. testssl.sh verifikasi independen + 5 security header nginx (HSTS dkk) -- SELESAI & TERUJI (19 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (hasil hardening SSL Bagian 138 tidak cukup dipercaya dari test manual sendiri -- diverifikasi ulang pakai tool pihak ketiga independen) dan Rasa Keamanan (5 header proteksi browser ditambahkan sekaligus begitu ditemukan gap, bukan ditunda, sesuai arahan Teja "jangan ada kekurangan sekecil apapun yang ditunda").
+
+**Konteks:** melanjutkan langsung dari Bagian 138 (SSL/TLS nginx hardening) di sesi yang sama.
+
+### testssl.sh -- verifikasi independen hasil hardening SSL
+git clone testssl.sh (v3.3dev, OpenSSL bundle sendiri jadi tidak tergantung versi sistem) ke ~/testssl.sh. Dijalankan ./testssl.sh --fast https://api.benangrasa.com
+
+Hasil: Grade A+, skor 93 (Protocol Support 100/30, Key Exchange 90/27, Cipher Strength 90/36). Ini konfirmasi independen dari pihak ketiga bahwa hardening TLS Bagian 138 (drop TLSv1/1.1, cipher suite modern) beneran efektif -- bukan cuma lolos test manual sendiri.
+
+### HSTS + 4 security header nginx -- ditemukan gap, langsung ditutup
+Cek header via testssl.sh --headers -> HSTS tidak ada sama sekali. Sesuai arahan eksplisit Teja di sesi ini ("kalau ada yang kurang tambahin, jangan tunda sekecil apapun") -- ditambahkan 5 header sekaligus di /etc/nginx/sites-enabled/api.benangrasa.com (blok server HTTPS, setelah baris ssl_dhparam):
+
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+Keputusan desain: SENGAJA belum pakai HSTS preload -- itu langkah permanen susah dibalik (submit ke daftar preload browser global), worth dipertimbangkan belakangan setelah domain custom tenant (Bagian 118) lebih matang, bukan diputuskan buru-buru sekarang.
+
+Testing: nginx -t OK, reload nginx, curl -I konfirmasi ke-5 header muncul di response.
+
+Temuan minor (dicatat, TIDAK dikejar karena dampak nol): X-Content-Type-Options: nosniff muncul 2 kali di response header (sekali dari nginx yang baru ditambah, sekali lagi entah dari mana -- grep server.js/*.js/package.json semua nihil, bukan dari helmet.js atau middleware eksplisit manapun yang ketemu). Browser tetap baca dengan benar meski dobel, tidak ada dampak fungsional/keamanan. Sumber pastinya belum ketemu -- kalau penasaran lagi di sesi depan, cek juga node_modules dependency yang mungkin auto-inject header (bukan prioritas, murni rasa ingin tahu teknis).
+
+**Catatan:** perubahan nginx config ini di /etc/nginx/, bukan bagian repo git -- tidak ada commit kode untuk bagian ini, cukup tercatat di checkpoint.
+
+**Status: 2 item tambahan (testssl.sh verifikasi + 5 security header) SELESAI & TERUJI.** Total sesi ini sekarang 9 item dieksekusi tuntas dari nol sampai dites (Bagian 136-139): npm audit, gitleaks, SWAP, PM2 memory limit, unattended-upgrades auto-reboot, Redis hardening, SSL/TLS nginx, SSH hardening, testssl.sh+security headers.
+
+**Next steps aktif (belum berubah dari Bagian 138):**
+[ ] Polish pass 13 titik pesan "internal error" generic
+[ ] P0-6 -- schema/migration reproducibility
+[ ] PIN progressive lockout
+[ ] Test suite CI gate
+[ ] #16/#17 Bagian 119 -- audit trail admin & monitoring
+[ ] 51 saran Lynis sisanya (Tingkat 2+ Bagian 127/133) -- menyusul, bukan mendesak
+[ ] (opsional, rasa ingin tahu) telusuri sumber X-Content-Type-Options duplikat
+
+## 140. eslint-plugin-security terpasang -- SELESAI & TERUJI, 0 temuan kritis (19 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (5 warning yang muncul tidak langsung diabaikan sebagai "pasti false positive" maupun diterima mentah sebagai "pasti masalah" -- tiap satu diverifikasi lewat pengujian nyata atau pembacaan kode sumber datanya sebelum disimpulkan).
+
+**Konteks:** melanjutkan item Tingkat 2 Bagian 127 di sesi yang sama, setelah Bagian 136-139. Belum ada ESLint sama sekali di project sebelumnya (dicek package.json + .eslintrc*, kosong total).
+
+**Instalasi:** `npm install --save-dev eslint eslint-plugin-security` (Node v20.20.2, ESLint 9.x flat config). File `eslint.config.js` dibuat baru, scope `**/*.js` dengan ignore `node_modules/` dan `testssl.sh/` (folder tool eksternal yang di-clone Bagian 139, bukan kode proyek).
+
+**Hasil scan (`npx eslint .`): 5 warning, 0 error.**
+
+1. `scripts/set-tenant-api-keys.js:34` -- detect-non-literal-fs-filename (belum ditelusuri detail, low-risk karena script ini dijalankan manual oleh Teja sendiri bukan dari request eksternal)
+2. `server.js:28` -- detect-unsafe-regex, pada regex CORS `ALLOWED_ORIGIN_PATTERNS` (Bagian 124). **Diverifikasi FALSE POSITIVE lewat pengujian nyata**: dites dengan input adversarial (string 50.000 karakter dirancang memicu backtracking) -> selesai dalam 0ms. Regex ini cuma 1 level quantifier (bukan nested quantifier `(a+)+` yang jadi pola klasik rentan ReDoS) -- plugin men-flag berdasar pola permukaan `+` di dalam grup optional, bukan analisis matematis presisi.
+3-5. `sessionStore.js:92-95` -- detect-object-injection x3, pada `results[i]` dan `tokens[i]`. **Diverifikasi FALSE POSITIVE**: ini akses array pakai index integer dari loop `for`, bukan `object[userInput]` yang bisa diarahkan pihak luar. Dicek asal `tokens` -> `redis.smembers(key)`, data dari index session Redis milik sistem sendiri, bukan input request. Pola ini pattern false-positive yang dikenal luas untuk eslint-plugin-security (plugin ini men-flag SEMUA bracket notation access, termasuk array index biasa).
+
+**Kesimpulan:** konsisten dengan gitleaks (Bagian 136) dan Lynis (Bagian 138) -- tidak ada temuan kritis baru di kode. Tools tetap dipasang permanen (bukan cuma sekali jalan) supaya kode BARU ke depan otomatis ke-scan setiap kali.
+
+**Commit:** ec1ef19 (package.json, package-lock.json, eslint.config.js -- 3 file, 903 insertion, npm audit setelah install tetap 0 vulnerabilities).
+
+**Status: eslint-plugin-security SELESAI & TERUJI.** Total sesi ini sekarang 10 item dieksekusi tuntas dari nol sampai dites (Bagian 136-140): npm audit, gitleaks, SWAP, PM2 memory limit, unattended-upgrades auto-reboot, Redis hardening, SSL/TLS nginx, SSH hardening, testssl.sh+security headers, eslint-plugin-security.
+
+**Next steps aktif (belum berubah dari Bagian 139, item 1 dari daftar minor dicoret):**
+[ ] Polish pass 13 titik pesan "internal error" generic
+[ ] P0-6 -- schema/migration reproducibility
+[ ] PIN progressive lockout
+[ ] Test suite CI gate
+[ ] #16/#17 Bagian 119 -- audit trail admin & monitoring
+[ ] 51 saran Lynis sisanya (Tingkat 2+ Bagian 127/133) -- menyusul, bukan mendesak
+[ ] scripts/set-tenant-api-keys.js:34 detect-non-literal-fs-filename -- belum ditelusuri detail (low-risk, dijalankan manual)
+[ ] (opsional, rasa ingin tahu) telusuri sumber X-Content-Type-Options duplikat (Bagian 139)
+
+## 141. Radar Teknologi -- run pertama (19 Agustus 2026)
+
+Trigger: manual, permintaan Teja setelah rangkaian eksekusi Bagian 136-140.
+
+Temuan utama: Claude Security -- plugin resmi Anthropic untuk Claude Code, beta rilis 22 Juli 2026. Multi-agent vulnerability scanner (bukan cuma pattern-matching kayak eslint-plugin-security yang baru dipasang Bagian 140) -- mapping arsitektur, threat-modeling, cross-reference antar file, verifikasi silang findings lewat majority-vote panel untuk turunkan false positive. Scan pending changes sebelum commit atau full codebase. Output laporan terstruktur (severity, CWE ID, exact sink line, exploit scenario) ke folder CLAUDE-SECURITY-<timestamp>/. Tidak auto-patch -- kasih saran patch yang direview & di-apply manual.
+
+**Status: RELEVAN TAPI TERKUNCI.** Butuh Claude Code (min v2.1.154+), sedangkan status Claude Code project ini masih "ditunda" (Bagian 8, constraint pembayaran domestik). Dicatat untuk dieksekusi begitu Claude Code kepake -- next step besar tersendiri, bukan next step langsung sekarang.
+
+Log radar: 19 Agustus 2026 -- 1 temuan relevan (terkunci), dicatat di atas.
+
+## 142. Restore Drill -- SELESAI & TERUJI (19 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (backup yang selama ini cuma diverifikasi lewat "file .sql.gz tidak corrupt" akhirnya benar-benar dibuktikan bisa dipulihkan jadi database utuh dan berfungsi, bukan diasumsikan aman) dan Rasa Keamanan (proses dijalankan di lingkungan terisolasi -- database & server PostgreSQL sementara, sama sekali tidak menyentuh Supabase produksi -- lalu dibersihkan total setelah verifikasi selesai).
+
+**Konteks:** Item ini sudah lama dicatat sebagai prioritas (disebut berkali-kali sejak beberapa sesi lalu, archive bagian 68) tapi belum pernah dieksekusi -- backup otomatis cron (bagian 44) cuma pernah diverifikasi "file tidak corrupt", belum pernah benar-benar direstore ke instance kosong.
+
+**Eksekusi:**
+1. PostgreSQL 17 server diinstall sementara di VPS (dari repo PGDG yang sama dengan client yang sudah ada) -- dipilih server lokal, bukan project Supabase baru, karena kuota free tier Supabase sudah terpakai penuh (2 project).
+2. Database kosong `restore_drill_test` dibuat, terpisah total dari database manapun yang aktif.
+3. Backup terbaru (`fashion_platform_20260819_030001.sql.gz`) di-restore ke database itu. Error yang muncul (role `supabase_admin`, `anon`, `authenticated`, dll tidak ditemukan) dikonfirmasi normal -- itu role infrastruktur khusus Supabase yang memang tidak ada di PostgreSQL polos, bukan indikasi data gagal masuk.
+4. Verifikasi data: 27 tabel semua terbentuk, `production_jobs` 1 baris (current_stage jahit, version 20 -- cocok data terkini), `staff` 5 baris (nama & role cocok persis), `production_events` 19 baris, `discrepancy_cases` 5 baris. Semua konsisten dengan kondisi data aktual di Supabase produksi.
+5. Cleanup: `restore_drill_test` di-drop, PostgreSQL server 17 di-purge total dari VPS (RAM kembali longgar, dari 77Mi jadi 229Mi free).
+6. Verifikasi tidak ada regresi: `psql`/`pg_dump` client (dipakai backup cron) dikonfirmasi tetap utuh setelah purge server. Script `~/backup-db.sh` dites manual -- berhasil, file baru ter-generate normal.
+
+**Kesimpulan:** Backup harian TERBUKTI bisa dipulihkan penuh, bukan cuma asumsi. Proses restore dari file `.sql.gz` sampai database siap pakai memakan waktu kurang dari 5 menit untuk ukuran data saat ini.
+
+**Status: SELESAI & TERUJI.** Item pertama dari 15 next steps aktif (bagian 5) tercoret.
+
+## 143. Backup Off-site 3-2-1 (Google Drive via rclone) -- SELESAI & TERUJI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Grosir (backup sekarang otomatis ada di 2 lokasi terpisah tanpa disentuh manual lagi ke depan) dan Rasa Ketelitian (2 kali gagal setup ditelusuri sampai akar masalah, bukan ditinggal).
+
+**Konteks:** Backup harian selama ini cuma ada di VPS itu sendiri -- kalau VPS bermasalah, restore drill (Bagian 142) jadi tidak berguna karena sumber backup ikut hilang.
+
+**Eksekusi:**
+1. rclone diinstall. Client ID default rclone gagal 2 kali: Error 400 invalid_request (diblokir Google), lalu setelah pindah ke Termux HP kena Error 403 rateLimitExceeded (kuota bersama jutaan user rclone penuh).
+2. Solusi: bikin Google Cloud project + OAuth Client ID sendiri (project "rclone-backup"), scope drive.file (rclone cuma akses file yang dia buat sendiri). Sempat kena Error 403 access_denied karena app masih status Testing -- diperbaiki dengan menambahkan email sendiri sebagai Test User di OAuth consent screen.
+3. Ditemukan: folder yang dibuat client ID default jadi tidak terlihat oleh client ID baru (konsekuensi isolasi scope drive.file, bukan bug) -- folder dibuat ulang.
+4. Script ~/backup-db.sh diupdate: setelah backup lokal, otomatis rclone copy ke gdrive_backup:fashion-platform-backups/, plus rclone delete file di Drive yang lebih tua dari 30 hari (retensi off-site lebih panjang dari lokal 14 hari).
+5. Testing end-to-end: ~/backup-db.sh dijalankan manual, backup lokal DAN off-site sukses dalam 1 kali jalan, terverifikasi lewat rclone lsl.
+
+**Status: SELESAI & TERUJI.** Cron harian (jam 3 pagi) otomatis backup ke 2 lokasi mulai malam ini, tanpa perlu disentuh manual lagi.
+
+## 144. UptimeRobot + Sentry Error Tracking -- SELESAI & TERUJI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Keamanan (backend sekarang punya deteksi dini kalau down atau error, bukan menunggu tenant lapor duluan) dan Rasa Ketelitian (fungsi diverifikasi end-to-end lewat endpoint test sengaja dipicu, bukan diasumsikan jalan cuma karena install sukses -- endpoint test dihapus lagi setelah diverifikasi).
+
+**Konteks:** ditandai "murah sekarang, mahal kalau nunggu ada trafik" (Bagian 127) -- dieksekusi sebelum ada tenant nyata pertama.
+
+**Eksekusi:**
+1. UptimeRobot: akun dibuat, monitor HTTP(s) dipasang untuk https://api.benangrasa.com, alert ke email pemilik.
+2. Sentry: project "fashion-platform-backend" dibuat di organisasi Sentry "benangrasa" (ternyata sudah pernah ada dari percobaan lama, belum pernah dipakai). @sentry/node diinstall (0 vulnerabilities), Sentry.init() dipasang di baris paling awal server.js (sebelum require lain), Sentry.setupExpressErrorHandler(app) dipasang setelah semua routes. DSN disimpan di .env (SENTRY_DSN), tidak pernah di-hardcode atau ditampilkan ke chat/log.
+3. Testing: endpoint sementara /v1/sentry-test dibuat, sengaja throw Error, dipanggil lewat curl -- dikonfirmasi masuk ke Sentry dashboard DAN email alert terkirim. Endpoint test dihapus setelah verifikasi, dikonfirmasi 404 kembali.
+
+**Temuan sampingan (dicatat, BUKAN bug baru dari Sentry):** response error Express saat ini menampilkan full stack trace (path file server, struktur folder node_modules) ke client publik -- risiko kebocoran informasi internal. Ditambahkan ke next steps aktif.
+
+**Status: SELESAI & TERUJI.**
+
+## 145. Sembunyikan Stack Trace Error dari Response Publik -- SELESAI & TERUJI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Keamanan (informasi internal server -- path file, struktur folder, dependency -- tidak lagi bocor ke siapapun yang memicu error dari luar).
+
+**Konteks:** ditemukan sebagai efek samping saat testing Sentry (Bagian 144) -- response error menampilkan full stack trace termasuk path lengkap server dan node_modules.
+
+**Eksekusi:**
+1. Root cause: NODE_ENV belum pernah diset sama sekali di .env -- Express secara default menampilkan stack trace kalau NODE_ENV bukan "production".
+2. Ditambahkan NODE_ENV=production ke .env.
+3. Dibuat .env.example (belum pernah ada sebelumnya) sebagai template lengkap semua env vars yang dipakai proyek (DATABASE_URL, SUPABASE_URL/SECRET_KEY, REDIS_PASSWORD, API_KEY, SENTRY_DSN, NODE_ENV, dst) tanpa nilai asli -- supaya next dev/sesi tidak perlu menebak dari kode.
+4. Testing: endpoint sementara dibuat sengaja throw Error, dikonfirmasi response berubah dari full stack trace menjadi "Internal Server Error" generik. Endpoint test dihapus, dikonfirmasi 404.
+
+**Status: SELESAI & TERUJI.**
+
+## 146. Dependency Pinning -- SELESAI & TERUJI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Keamanan (menutup gap supply-chain attack yang dicatat Bagian 133/135 -- npm install tidak lagi bisa diam-diam menarik versi baru yang belum divalidasi).
+
+**Eksekusi:**
+1. Semua 10 dependency di package.json (dependencies + devDependencies) diverifikasi versi terinstall aktual (lewat npm list), dikonfirmasi 100% cocok dengan versi tertulis di package.json.
+2. Simbol ^ dihapus dari semua entry -- dikunci ke versi persis (contoh: express ^5.2.1 menjadi 5.2.1).
+3. Testing: npm install dijalankan ulang (up to date, tidak ada perubahan), npm audit tetap 0 vulnerabilities, syntax server.js valid, PM2 restart sehat, endpoint API tetap responsif.
+
+**Status: SELESAI & TERUJI.**
+
+## 147. Tabel tenant_custom_domains -- SELESAI & TERUJI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Grosir (struktur database disediakan di depan untuk fitur domain custom tenant -- Bagian 118/124 -- walau belum ada tenant yang butuh sekarang, bukan ditambal belakangan saat mendadak diperlukan).
+
+**Eksekusi:**
+1. Dicek skema tenants dan pola RLS tenant_billing sebagai referensi konsistensi struktur.
+2. Tabel tenant_custom_domains dibuat via Supabase MCP apply_migration: id, tenant_id (FK ke tenants), domain (unique), verification_status, verification_token, ssl_status, verified_at, created_at, updated_at.
+3. RLS diaktifkan dengan policy tenant_isolation standar (current_setting('app.tenant_id')), konsisten semua tabel lain.
+4. Grant app_user: SELECT, INSERT, UPDATE -- TANPA DELETE (histori domain tidak boleh sembarangan hilang, konsisten prinsip audit trail proyek).
+5. Testing: Supabase security advisor 0 temuan. Diverifikasi ulang dari VPS via psql sebagai app_user (bukan lewat MCP yang privileged, sesuai SOP RLS testing) -- tabel bisa diakses normal, 0 rows (kosong, sesuai ekspektasi tabel baru).
+
+**Catatan:** tabel ini murni struktur -- belum ada endpoint/UI yang memakainya. Endpoint verifikasi domain (DNS TXT record check, dst) menyusul saat ada tenant nyata yang butuh custom domain.
+
+**Status: SELESAI & TERUJI.**
+
+## 148. ClamAV Scan Upload Foto -- DICOBA, DITUNDA (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (dicoba nyata sampai ketemu batasan konkret, bukan diasumsikan bisa jalan dari teori -- lalu jujur ditunda dengan alasan terukur, bukan dipaksakan sampai server produksi kena resiko).
+
+**Eksekusi & temuan:**
+1. ClamAV diinstall (clamav, clamav-daemon). clamscan standalone dites -- BUTUH ~1.5 menit tiap panggilan (loading + compiling database virus signature ulang tiap kali), tidak praktis untuk production real-time.
+2. clamd daemon dicoba sebagai solusi (database di-load sekali, stay di memory) -- tapi begitu running, memakai 671MB dari total 957MB RAM VPS (68.5%), plus 808Mi swap terpakai. Sempat membuat CPU 99.5% dan RAM 97.3% saat proses dimatikan (server utama tetap online tapi dalam tekanan berat).
+3. clamd langsung dimatikan begitu ditemukan, VPS pulih ke RAM 151Mi terpakai. ClamAV di-purge total (clamav, clamav-daemon, clamav-freshclam) + autoremove dependency (144MB disk freed).
+
+**Kesimpulan:** ClamAV TIDAK COCOK untuk VPS 1GB RAM ini dalam kondisi sekarang -- baik mode on-demand (terlalu lambat) maupun daemon (terlalu boros RAM, beresiko OOM server produksi). Ini gejala dari masalah lebih besar: VPS sudah dekat kapasitas (sudah dicatat lama sebagai "VPS upgrade considerations").
+
+**DITUNDA sampai salah satu prasyarat terpenuhi:**
+- VPS di-upgrade ke RAM lebih besar, ATAU
+- Pindah ke pendekatan cloud-based scanning API (belum diriset -- perlu evaluasi biaya, rate limit, dependency pihak ketiga)
+
+**Status: TIDAK dieksekusi sekarang, dicatat sebagai next step bersyarat (nunggu VPS upgrade atau alternatif cloud API).**
+
+## 149. VPS RAM Upgrade -- SS 2.1 (2GB RAM) -- SELESAI & TERUJI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (verifikasi tiap tahap sebelum lanjut -- backup dulu, konfirmasi prorata ke support sebelum bayar, cek RAM/PM2/endpoint setelah resize, bukan asumsi "pasti berhasil").
+
+**Eksekusi:**
+1. Backup manual dijalankan sebelum resize (`fashion_platform_20260820_104241.sql.gz`, lokal + off-site).
+2. Konfirmasi ke support Biznet Gio: resize dikenakan prorata untuk sisa masa aktif, due date/siklus billing TETAP sama (bukan reset), invoice berikutnya baru pakai harga paket baru penuh.
+3. Resize dari XS 1.1 (1 Core, 1GB RAM) ke SS 2.1 (1 Core, 2GB RAM) via portal Biznet Gio, dibayar prorata.
+4. Resize berhasil in-place tanpa perlu Stop/Start manual -- langsung aktif setelah restart otomatis.
+
+**Verifikasi:**
+- RAM: 957Mi -> 1.9Gi (available: 656Mi -> 1.5Gi)
+- Swap: bersih total (0B terpakai, sisa 118Mi dari insiden ClamAV lama ikut terbersihkan)
+- PM2: status online, auto-restart jalan normal tanpa intervensi manual (36.9mb -> 85.1mb, wajar karena fresh restart)
+- Endpoint `/v1/whoami` merespons benar dengan tenant resolution utuh (tenantId + subdomain valid)
+
+**Status: SELESAI & TERUJI.**
+
+## 150. ClamAV -- Percobaan Kedua Pasca Upgrade RAM -- TERINSTALL, BELUM DIINTEGRASI (20 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (retest asumsi lama setelah kondisi berubah -- RAM dobel -- alih-alih menganggap kesimpulan lama otomatis masih berlaku selamanya).
+
+**Konteks:** Bagian 148 mendokumentasikan ClamAV ditunda karena RAM VPS 1GB tidak cukup. Setelah Bagian 149 (upgrade ke 2GB), dicoba ulang.
+
+**Eksekusi & temuan:**
+1. ClamAV diinstall ulang dari nol (clamav, clamav-daemon, clamav-freshclam). Database virus ter-update otomatis (main.cvd 85M + daily.cvd 23M, versi 28098 per 20 Agustus 2026).
+2. clamd daemon dicoba: berhasil nyala stabil, RAM terpakai 963.5M (vs 671MB di VPS lama) -- available tersisa 631Mi dari 1.9Gi total. Tes EICAR berhasil detect (`Eicar-Test-Signature FOUND`, 0.009 detik).
+3. Dipertimbangkan ulang: 963.5M untuk 1 daemon dianggap tidak proporsional (>50% RAM total) mengingat belum ada tenant nyata/kebutuhan real-time scanning. Daemon dimatikan & di-disable (service + socket), RAM available kembali ke 1.5Gi.
+4. clamscan on-demand dites sebagai alternatif: berhasil detect EICAR, tapi makan waktu 25.956 detik per scan (loading + compiling database dari nol tiap panggilan) -- dianggap terlalu lambat untuk endpoint upload real-time kalau nanti diintegrasi sync.
+
+**Keputusan:** ClamAV **sengaja dibiarkan terinstall tapi tidak aktif** (daemon off, freshclam tetap jalan untuk jaga database tetap update). Alasan: belum ada tenant nyata yang butuh proteksi upload aktif sekarang, jadi trade-off RAM (daemon) vs kecepatan (on-demand) belum perlu diputuskan final -- infrastruktur sudah siap dipanggil kapan saja saat integrasi ke endpoint `/v1/photos` dikerjakan.
+
+**Next step (belum dieksekusi):** Integrasi ke server.js di endpoint `/v1/photos` -- perlu keputusan arsitektur: scan sync (blocking, lambat kalau on-demand) vs scan async (foto diterima dulu, di-scan di background, di-flag kalau infected setelahnya). Cenderung ke arah async + on-demand clamscan sebagai kombinasi paling seimbang untuk RAM & UX, tapi belum final -- menunggu giliran di antrian next steps.
+
+**Status: TERINSTALL & FUNGSIONAL, BELUM DIINTEGRASI KE KODE.**
+
+## 151. 2FA Akun Kritis -- GitHub, Supabase, Biznet Gio (via Google SSO) -- SELESAI & TERUJI (21 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Keamanan (3 titik akses tunggal paling kritis -- repo kode, database tenant, VPS+domain -- sekarang wajib verifikasi kedua, bukan cuma password) dan Rasa Ketelitian (status "Google OTP Enabled" di Biznet Gio awalnya menyesatkan -- tampil hijau tapi backend masih nolak login dengan pesan "You need to setup OTP first" -- tidak diterima mentah, ditelusuri sampai dikonfirmasi ke Support akar masalahnya).
+
+**Konteks:** item ini sudah lama dicatat di next steps aktif (Bagian 5) tapi belum dieksekusi. Dikerjakan tuntas di sesi ini, akun demi akun, satu-langkah-satu-waktu.
+
+### GitHub -- SELESAI & TERUJI
+2FA diaktifkan via Settings -> Password and authentication -> Two-factor authentication -> Authenticator app (manual setup key, QR sulit di-scan). Recovery codes (10 kode) didownload dan dipindahkan ke Google Drive (folder "Recovery Codes - PENTING"), dihapus dari folder Download HP setelah dikonfirmasi ter-upload. Preferred 2FA method: Authenticator app.
+
+### Supabase -- SELESAI & TERUJI
+MFA diaktifkan via Account Preferences -> Security -> Add app (manual key, QR sulit di-scan). Terverifikasi ter-add dengan timestamp 20 Agustus 2026, 22:46:22 (+0700).
+
+### Biznet Gio + domain (benangrasa.com) -- SELESAI & TERUJI, dengan temuan penting
+Percobaan pertama gagal ("wrong token") karena spasi ikut ter-paste ke key authenticator app -- diperbaiki dengan menghapus spasi sebelum paste ulang.
+
+**Temuan:** setelah setup "berhasil" (notifikasi hijau "2FA completed" muncul 2 kali di 2 percobaan terpisah), status tetap menampilkan pesan merah "You need to setup OTP first" dan login ulang (termasuk setelah clear cookies + incognito) tetap tidak pernah diminta kode OTP.
+
+**Root cause (dikonfirmasi via Support Biznet Gio):** akun ini login menggunakan SSO Google (Google -- Linked), bukan email+password. OTP di portal Biznet Gio HANYA berlaku untuk login email+password -- untuk akun yang daftar/login via SSO Google, OTP portal tidak akan pernah diminta. Ini BUKAN bug, melainkan behavior yang memang seperti itu di sisi Biznet Gio.
+
+**Tindak lanjut yang benar:** proteksi 2FA yang relevan dipindah ke akun Google itu sendiri (suarakyat1945@gmail.com), karena itu titik otentikasi asli untuk SSO. Dicek: Verifikasi 2 Langkah akun Google itu ternyata BELUM aktif sebelumnya. Diaktifkan via myaccount.google.com -> Keamanan -> Verifikasi 2 Langkah -> Aplikasi Authenticator (manual key, QR sulit di-scan). Dikonfirmasi aktif: "Verifikasi 2 Langkah -- Aktif sejak 09.50" (21 Agustus 2026). 10 kode cadangan (backup codes) disimpan via screenshot ke folder Google Drive yang sama ("Recovery Codes - PENTING").
+
+**Pelajaran untuk next steps sejenis:** kalau ada akun lain yang login-nya juga via SSO (Google/GitHub/dst), 2FA yang perlu diperkuat adalah 2FA di provider SSO-nya (Google/GitHub), bukan di portal yang menumpang SSO tersebut -- toggle 2FA di portal tumpangan itu sendiri bisa jadi tidak relevan atau menyesatkan (seperti kasus Biznet Gio ini).
+
+**Status: 3 dari 3 akun (GitHub, Supabase, Biznet Gio+domain via Google SSO) SELESAI & TERUJI, recovery codes semua tersimpan di 2 lokasi (device + Google Drive).**
+
+**Next steps aktif (belum berubah dari Bagian 150, item 2FA dicoret dari next steps):**
+[ ] OWASP ZAP dynamic testing ke tenant demo
+[ ] ClamAV integrasi ke endpoint /v1/photos (sync vs async, lihat Bagian 150)
+[ ] Draft awal ToS + Privacy Policy
+[ ] Lapis 3 audit keamanan manusia (freelance pentester)
+[ ] Mandat eksplisit owner->mediator kasus SERIOUS
+[ ] k6 load testing endpoint confirm
+[ ] Frontend web responsive -- PRIORITAS BERIKUTNYA (lihat catatan cross-check ChatGPT di bawah)
+[ ] Backend inventory (CRUD lengkap, baru ada function reserve_fabric_inventory)
+[ ] Dashboard Owner
+[ ] Polish pass 13 titik pesan "internal error" generic
+[ ] P0-6 -- schema/migration reproducibility
+[ ] PIN progressive lockout
+[ ] Test suite CI gate
+[ ] #16/#17 -- audit trail admin & monitoring
+[ ] 51 saran Lynis sisanya
+
+## 152. Cross-check ChatGPT -- Penilaian Ulang Status Proyek (21 Agustus 2026)
+
+**Konteks:** cross-check independen ke ChatGPT (sesuai prinsip kolaborasi -- keputusan berisiko tinggi diverifikasi silang), mengecek langsung ke GitHub/Supabase/Vercel per 20 Agustus 2026.
+
+**Temuan utama:**
+- Supabase sudah bukan schema kosong: 2 tenant, 5 staff, 2 orders, 1 production job, 19 production events, 8 stage submissions, 4 foto produksi, 5 discrepancy cases, 24 pesan discrepancy -- semua tabel utama RLS-enabled, security advisor 0 lint.
+- Performance advisor Supabase menunjukkan banyak unindexed foreign keys dan RLS init-plan warning (current_setting() dievaluasi ulang per-row, solusi umum: bungkus dengan (select ...)) -- ini masalah efisiensi query untuk skala besar, BUKAN celah keamanan. Belum mendesak karena data masih kecil.
+- Unused indexes terdeteksi -- SENGAJA belum dihapus, database masih terlalu kecil untuk menyimpulkan index itu tidak diperlukan.
+- Vercel: deployment production READY, tapi framework metadata masih null dan checkpoint sendiri mengonfirmasi frontend web responsive belum tersentuh -- READY di level infra tidak sama dengan produk frontend selesai.
+- Penilaian ChatGPT: backend/data architecture 9/10, security/infrastructure 8.5/10, production logic 8.5-9/10, database maturity 8.5/10, frontend/UX 2-3/10, commercial validation ~1/10.
+
+**Rekomendasi ChatGPT (disetujui sebagai arah ke depan):** hentikan dulu penambahan security hardening berlapis-lapis kecuali ada vulnerability nyata -- backend sudah mendekati fondasi production-grade, tapi bottleneck sekarang bukan lagi "bisa bikin backend", melainkan "bisa mengubah backend ini jadi aplikasi yang dipakai satu brand setiap hari". Prioritas berikutnya: backend inventory (belum ada CRUD lengkap, baru function reserve_fabric_inventory), Dashboard Owner, baru frontend web responsive secara keseluruhan.
+
+**Keputusan Teja:** selesaikan dulu semua item yang sudah terbuka di next steps aktif SEBELUM pindah ke scope backend inventory/dashboard owner/frontend -- disiplin tidak menumpuk pekerjaan baru di atas yang belum tuntas.
+
+**Status: dicatat sebagai arah jangka menengah, belum ada eksekusi kode dari cross-check ini.**
+
+## 153. Polish Pass -- 13 Pesan "internal error" Generic Diganti Manusiawi -- SELESAI & TERUJI (21 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Copywriting (13 titik pesan error generic "internal error" yang gak informatif dan gak manusiawi diganti jadi bahasa yang ngomong kaya manusia, konsisten sama pola yang udah ada di titik lain seperti baris 1117/1201/dst) dan Rasa Ketelitian (tiap baris diverifikasi persis via assertion-based script sebelum ditulis -- gak ada yang ditimpa asal tebak nomor baris -- dan hasil akhirnya dites nyata lewat endpoint sungguhan, bukan diasumsikan berhasil cuma karena "SYNTAX OK").
+
+**Konteks:** item ini sudah lama dicatat di checklist keamanan (Bagian 6) sebagai next steps aktif tapi belum dieksekusi.
+
+**Eksekusi:**
+1. grep semua titik `res.status(500).json({ error: "internal error" })` di server.js -> ditemukan persis 13 titik, tersebar di endpoint: /v1/events, /v1/orders, /v1/staff/list, /v1/mediators, /v1/staff/offboard, /v1/lock/acquire, /v1/lock/release, /v1/lock/force-unlock, /v1/stage-submissions, /v1/stage-submissions/:id/confirm, /v1/photos, /v1/notifications, /v1/notifications/:id/read.
+2. Karena ke-13 baris isinya identik persis (tidak bisa dibedakan via str_replace biasa), dibuat script Python assertion-based (`fix_error_messages.py`) yang mapping tiap nomor baris ke pesan pengganti spesifik konteks endpoint-nya. Script mengecek SEMUA 13 baris persis sesuai ekspektasi dulu sebelum menulis satu pun perubahan ke file -- kalau ada 1 assertion gagal, script berhenti total tanpa partial-write.
+3. Pesan pengganti disesuaikan konteks tiap endpoint (bukan template sama rata) -- misal /v1/lock/force-unlock (endpoint darurat) dikasih instruksi tambahan "atau langsung kontak admin kalau masih macet" karena situasinya biasanya sudah agak darurat (staff kejebak).
+
+**Testing:**
+- `node -c server.js` -> SYNTAX OK.
+- `git diff` direview penuh, 13 perubahan sesuai rencana, tidak ada yang meleset endpoint.
+- `pm2 restart --update-env` -> online normal.
+- Bukti nyata (bukan asumsi): endpoint `/v1/events` sengaja dipicu error dengan `order_id` bukan UUID valid -> response berubah dari `"internal error"` jadi `"Waduh, data event-nya gagal kesimpen. Coba ulangi beberapa saat lagi ya."`. Endpoint lain tidak dites satu-satu secara terpisah karena pola perubahannya identik dan sudah diverifikasi via assertion script yang sama.
+
+**Commit:** 0f137ea (server.js, 13 insertion + 13 deletion).
+
+**Status: SELESAI & TERUJI.**
+
+**Next steps aktif (belum berubah dari Bagian 152, item polish pass dicoret):**
+[ ] OWASP ZAP dynamic testing ke tenant demo
+[ ] ClamAV integrasi ke endpoint /v1/photos (sync vs async, lihat Bagian 150)
+[ ] Draft awal ToS + Privacy Policy
+[ ] Lapis 3 audit keamanan manusia (freelance pentester)
+[ ] Mandat eksplisit owner->mediator kasus SERIOUS
+[ ] k6 load testing endpoint confirm
+[ ] P0-6 -- schema/migration reproducibility
+[ ] PIN progressive lockout
+[ ] Test suite CI gate
+[ ] #16/#17 -- audit trail admin & monitoring
+[ ] 51 saran Lynis sisanya
+[ ] Frontend web responsive -- menyusul setelah next steps di atas tuntas (Bagian 152)
+[ ] Backend inventory (CRUD lengkap) -- menyusul setelah next steps di atas tuntas (Bagian 152)
+[ ] Dashboard Owner -- menyusul setelah next steps di atas tuntas (Bagian 152)
+
+## 154. PIN Progressive Lockout -- SELESAI & TERUJI (21 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Keamanan (rate limit lama cuma nahan spam CEPAT -- 5x/30 detik lalu reset otomatis -- penyerang sabar bisa terus nyoba pelan-pelan tanpa batas; lockout progresif ini nutup celah itu dengan hukuman yang makin berat tiap gagal beruntun) dan Rasa Customer Service (staff yang baru kena kunci langsung dikasih tau di percobaan yang sama -- bukan nunggu dia coba lagi baru ketahuan -- plus pesan manusiawi nyebut sisa waktu jelas, bukan 429 generik).
+
+**Konteks:** item ini sudah lama dicatat di next steps aktif (Bagian 5/151) tapi belum dieksekusi.
+
+**Desain:** lapis TAMBAHAN di atas rate limit fixed-window yang sudah ada (rateLimiter.js), bukan pengganti. Gagal ke-1 s/d ke-4: biasa (401). Gagal ke-5: kunci 1 menit. Ke-6: 5 menit. Ke-7: 30 menit. Ke-8 dst: 60 menit (plafon). PIN benar sekali -> reset total ke 0. Counter auto-expire 24 jam TTL di-refresh tiap gagal (bukan cuma sekali di awal) -- supaya "24 jam" dihitung dari percobaan TERAKHIR, bukan pertama (bug ini ketemu & diperbaiki sebelum diapply, saat review draft).
+
+**Implementasi:**
+1. `rateLimiter.js` ditambah 3 fungsi baru (checkProgressiveLockout, recordFailedPinAttempt, resetLockout), konsisten pola fail-open dengan checkRateLimit yang sudah ada (Redis down -> lockout dianggap tidak aktif, PIN yang benar tetap syarat utama).
+2. `server.js` endpoint /v1/staff/login diupdate via script assertion-based (fix_login_lockout.py, pola sama Bagian 153) -- checkProgressiveLockout dicek PALING AWAL (sebelum rate limit lama, hemat resource kalau memang lagi dikunci), recordFailedPinAttempt dipanggil pas PIN salah, resetLockout dipanggil pas PIN benar sebelum bikin sesi.
+
+**Testing end-to-end (bukti nyata, staff Gudang Demo, PIN sengaja dibuat salah):**
+- Gagal ke-1 s/d ke-4 -> 401 biasa. TERBUKTI.
+- Gagal ke-5 -> langsung 429 "Coba lagi dalam 1 menit ya" di percobaan yang SAMA (justLocked terdeteksi real-time, bukan baru ketahuan di percobaan berikutnya). TERBUKTI.
+- Selama masih terkunci, percobaan lanjut tetap 429 (diverifikasi lewat curl beruntun). TERBUKTI.
+- Setelah masa kunci 1 menit lewat (dikonfirmasi lewat Redis KEYS -- key lockout:until:* sudah auto-expire sendiri), gagal lagi -> naik ke tahap berikutnya, 429 "5 menit" (progresi tahap benar, bukan reset ke tahap 1 lagi). TERBUKTI.
+- Reset PIN staff sementara ke nilai testing via psql (SET app.tenant_id + UPDATE pin_hash, pola SOP RLS existing) -- dicoba login PIN benar SELAGI masih dalam masa kunci tahap 2 -> tetap 429 (lockout ngeblok di gerbang paling awal, gak peduli PIN benar/salah). TERBUKTI, sesuai desain.
+- Key lockout dihapus manual (situasi testing), retry PIN benar dari kondisi netral -> HTTP 200, token diterima. TERBUKTI.
+- Cek Redis KEYS "lockout:*aa322173*" setelah itu -> kosong total, resetLockout terbukti bersihin count DAN until sekaligus, bukan asumsi dari baca kode saja. TERBUKTI.
+- PIN staff dikembalikan ke nilai standar 1234 (CHECKPOINT_LOCAL.md) setelah testing selesai -- tidak ada sisa perubahan data.
+
+**Commit:** 5bea72d (rateLimiter.js +93, server.js +24). fix_login_lockout.py sengaja TIDAK ikut commit (pola sama fix_error_messages.py Bagian 153 -- script sekali-pakai, bukan bagian codebase permanen).
+
+**Status: SELESAI & TERUJI, seluruh skenario dibuktikan lewat testing langsung (bukan code review semata).**
+
+**Next steps aktif (belum berubah dari Bagian 153, item PIN progressive lockout dicoret):**
+[ ] OWASP ZAP dynamic testing ke tenant demo
+[ ] ClamAV integrasi ke endpoint /v1/photos (sync vs async, lihat Bagian 150)
+[ ] Draft awal ToS + Privacy Policy
+[ ] Lapis 3 audit keamanan manusia (freelance pentester)
+[ ] Mandat eksplisit owner->mediator kasus SERIOUS
+[ ] k6 load testing endpoint confirm
+[ ] P0-6 -- schema/migration reproducibility
+[ ] Test suite CI gate
+[ ] #16/#17 -- audit trail admin & monitoring
+[ ] 51 saran Lynis sisanya
+[ ] Frontend web responsive -- menyusul setelah next steps di atas tuntas (Bagian 152)
+[ ] Backend inventory (CRUD lengkap) -- menyusul setelah next steps di atas tuntas (Bagian 152)
+[ ] Dashboard Owner -- menyusul setelah next steps di atas tuntas (Bagian 152)
+
+## 155. Ide Besar: Dashboard Owner (4 Pilar) -- BELUM DIEKSEKUSI, dicatat untuk perencanaan jangka panjang (21 Agustus 2026)
+
+**Konteks:** obrolan santai pasca-selesai Bagian 154, Teja cerita kebiasaan nyata di konveksi tempat dia kerja -- gak ada Staff Gudang tetap, owner sendiri yang itung stok kain, laporan kekurangan alat/consumable nunut ke siapa staff yang notice duluan (biasanya tukang jahit/finishing). Dari situ muncul gambaran lebih besar soal isi Dashboard Owner yang selama ini cuma disebut generic di next steps (Bagian 152).
+
+**PENTING -- arahan eksplisit dari Teja:** ini BUKAN proyek buat dipakai sekadar cukup jalan sekarang. Target jangka panjang 5-10 tahun ke depan. Jangan didesain kecil/sederhana dari awal dengan asumsi "nanti dibesarin belakangan" -- keempat pilar di bawah ini harus dirancang PENUH dari awal (skema data, bukan cuma UI).
+
+**4 Pilar Dashboard Owner:**
+
+1. **Inventory kain PENUH** -- satuan dasar per ROLL (bukan per meter/potong). Kartu stok per roll, histori pergerakan (masuk kapan, dipakai buat order apa, sisa berapa), alert kalau stok di bawah ambang, nanti nyambung ke purchase order (owner beli kain baru -> otomatis nambah stok). BUKAN sekadar kanal catat angka manual.
+
+2. **Sistem keuangan PENUH** -- pemasukan per order, pengeluaran (bahan, gaji staff, operasional), biar owner tau untung-rugi NYATA per order, bukan kira-kira. Teja secara eksplisit menyebut ini SEPENTING pilar produksi -- alasan: banyak konveksi kecil bangkrut karena manajemen keuangan diabaikan (cashflow campur uang pribadi, gak tau margin sebenarnya, baru sadar rugi pas sudah telat). Ini bukan fitur pelengkap, ini salah satu tujuan utama platform.
+
+3. **Laporan kekurangan fleksibel** -- bahan, alat, consumable (gas, listrik, air). Bisa dilapor SIAPA AJA staff produksi yang sedang login, TIDAK digembok ke 1 role tertentu -- karena di konveksi nyata gak ada Staff Gudang tetap. Catatan teknis: role/permission harus dirancang fleksibel dari skema (berbasis izin, bukan hardcode ke 1 jabatan), supaya kalau nanti konveksi berkembang dan beneran ada Staff Gudang resmi, tinggal role itu ditambah tanpa bongkar ulang skema atau alur yang sudah ada.
+
+4. **KPI** -- angka kinerja terukur biar owner bisa lihat performa dalam 1 layar tanpa buka data mentah satu-satu. Contoh kategori (belum final): produksi (potong selesai per hari/minggu per tahap), keuangan (margin per order, pengeluaran bulan ini vs bulan lalu), kualitas (persentase reject/gap per tahap), stok (rata-rata berapa lama 1 roll kain habis, buat prediksi kapan harus beli lagi).
+
+**Kenapa 4 pilar ini saling nyambung, bukan fitur terpisah:** laporan kekurangan bahan bisa nge-trigger pencatatan keuangan pas dibeli; inventory kain nyambung ke KPI stok; keuangan nyambung ke KPI margin. Desain skema ke depan sebaiknya mempertimbangkan keterkaitan ini dari awal, bukan dibangun sebagai 4 modul terpisah yang baru disambung belakangan.
+
+**Status: IDE, belum masuk next steps aktif, belum ada desain skema/spec konkret. Perlu sesi terpisah buat detailing skema tabel per pilar sebelum eksekusi.**
+
+**Catatan tambahan Bagian 155 (pertimbangan desain, ditambahkan setelah review):**
+
+1. **Keterkaitan dengan sistem lapor yang SUDAH ADA:** proyek ini sudah punya `gap_status` di `production_jobs` (OPEN/RECOVERING/ESCALATED, lihat catatan schema v2) -- itu sistem lapor "ada masalah di 1 production job spesifik". Pilar 3 (Laporan kekurangan bahan/alat/consumable) itu KONSEP BEDA -- soal stok/kondisi global, bukan spesifik 1 job. Perlu diputuskan saat desain skema: apakah pola `gap_status`/`production_events` bisa dipakai ulang buat laporan kekurangan, atau memang harus tabel terpisah karena beda sifat. Jangan sampai staff bingung "lapor lewat mana" kalau dua sistem ini dibangun terpisah tanpa disadari kemiripannya.
+
+2. **Role/permission granular = pekerjaan arsitektur tersendiri, bukan cuma catatan teknis di pilar 3.** Role staff saat ini masih FIXED (admin/staff/owner hardcode di query, lihat server.js). Sistem permission fleksibel (supaya laporan kekurangan bisa dilapor siapa saja, dan siap kalau nanti ada Staff Gudang resmi) butuh perubahan arsitektur -- bukan sekadar tambahan kecil. Perlu dipikirkan sebagai item next steps sendiri saat mulai eksekusi 4 pilar ini, bukan disisipkan diam-diam ke pilar 3.
+
+## 156. OWASP ZAP Baseline Scan + Perbaikan Keamanan (22 Agustus 2026)
+
+**ZAP scan (9 alert, semua Medium ke bawah) -- semua ditindak:**
+- CSP Header dipasang lengkap (server.js/nginx) -- whitelist cdnjs.cloudflare.com, fonts.googleapis.com/gstatic.com, connect-src * (perlu karena fitur backendUrl custom di scanner.html)
+- SRI ditambahkan ke html5-qrcode.min.js (integrity+crossorigin). SRI untuk Google Fonts CSS di-skip (resource dinamis, tidak applicable), dimitigasi via CSP whitelist
+- Private IP Disclosure: placeholder scanner.html diganti dari 192.168.1.5:3000 ke https://demo.benangrasa.com
+- X-Powered-By: app.disable('x-powered-by') di server.js
+- Server version nginx: server_tokens off diaktifkan
+- Cache-Control scanner.html: eksplisit di-set "no-cache" (sebelumnya default Express public,max-age=0)
+- Suspicious Comments (1 baris comment kode): ditinjau, dampak nihil, dibiarkan (bukan rahasia)
+
+**Temuan besar di luar scope ZAP:**
+- Subdomain demo.benangrasa.com + SSL certificate dibuat -- sebelumnya tenant demo CUMA bisa diakses via curl+Host header spoof, TIDAK BISA diakses dari browser asli karena tenantResolver.js baca subdomain dari Host header asli (browser tidak bisa spoof Host). Sekarang scanner.html bisa diakses normal dari browser via https://demo.benangrasa.com/scanner.html
+- Bug field mismatch di scanner.html: kode pakai `s.staff_id`/`s.name`, API balikin `s.id`/`s.full_name` (sisa migrasi dari LTOS lama single-tenant). Sudah diperbaiki, dropdown staff sekarang tampil normal
+- INSIDEN: scanner.html sempat ke-corrupt jadi 8 baris saat proses sed (kemungkinan sesi Termux/SSH sempat putus di tengah proses tulis). Berhasil dipulihkan penuh via `git restore scanner.html`. Pelajaran: SELALU cek `wc -l` sebelum dan sesudah tiap sed edit ke file penting, verifikasi jumlah baris tidak berubah drastis sebelum lanjut ke command berikutnya.
+
+**Rotasi API key:**
+- `API_KEY` (env var generic lama) ternyata sudah TIDAK dipakai kode sama sekali (komentar eksplisit di server.js: "tidak ada lagi API_KEY global", verifikasi via verify_tenant_api_key()). Dihapus dari .env, tidak perlu rotate (dampak nol karena tidak ada endpoint yang menerimanya).
+- `BRG_DEMO_TENANT_API_KEY` dan `BRG_DEMO2_TENANT_API_KEY`: DIROTATE via script resmi `scripts/set-tenant-api-keys.js` (generate + update database via set_tenant_api_key() + tulis ke .env). Key lama terverifikasi mati (test curl balikin "API key tidak valid").
+
+## ATURAN PERMANEN PROYEK -- KEAMANAN KREDENSIAL (berlaku semua sesi, semua AI/tools)
+
+**Sejak 22 Agustus 2026: DILARANG menampilkan/meminta paste raw API key, password, atau secret apapun ke dalam chat/percakapan dengan AI manapun (Claude atau lainnya), dalam bentuk apapun -- termasuk sebagian/redacted manual.**
+
+Cara wajib verifikasi kredensial ke depan:
+- Gunakan `grep -c` (hitung kemunculan saja, bukan isi)
+- Gunakan output ter-mask (contoh pola: `scripts/set-tenant-api-keys.js` fungsi `mask()`)
+- Verifikasi via efek/test (curl test apakah key masih valid/tidak), bukan dengan menampilkan isinya
+- Substitusi nilai kredensial via sed/env langsung di VPS, tidak pernah lewat copy-paste manual read dari chat
+
+**PENDING -- next steps prioritas tinggi:** rotasi menyeluruh semua kredensial sensitif di .env sebagai tindakan pencegahan (karena riwayat chat lama tidak bisa diaudit pasti apakah pernah ter-expose):
+- [ ] SUPABASE_SECRET_KEY -- rotate via dashboard Supabase (Project Settings > API > Service Role/Secret Key > Regenerate). PERINGATAN: begitu di-regenerate, key lama langsung mati -- update .env + restart PM2 harus SEGERA setelahnya untuk minimalkan downtime.
+- [ ] DATABASE_URL -- rotate password postgres, urutan: ganti password di server DB dulu -> update .env -> restart PM2 cepat
+- [ ] BACKUP_DATABASE_URL -- sama seperti di atas
+- [ ] REDIS_PASSWORD -- ganti config Redis dulu -> update .env -> restart PM2
+- SUPABASE_URL, SENTRY_DSN, NODE_ENV: tidak sensitif, tidak perlu rotate
+
+
+## 157. Rotasi Menyeluruh 6 Kredensial Sensitif .env -- SELESAI (24 Agustus 2026)
+
+**Konteks:** kredensial ditemukan pernah tersimpan di chat WA pribadi & screenshot. Semua 6 kredensial sensitif di .env dianggap ter-expose dan dirotate penuh, teruji fungsional satu-satu (dibuktikan servis tetap jalan, bukan cuma "sudah diganti").
+
+**Selesai & teruji:** BRG_DEMO_TENANT_API_KEY, BRG_DEMO2_TENANT_API_KEY, REDIS_PASSWORD, SUPABASE_SECRET_KEY, DATABASE_URL (role app_user), BACKUP_DATABASE_URL (role postgres).
+
+## SOP PERMANEN -- CARA ROTATE KREDENSIAL (berlaku semua sesi ke depan)
+
+**A. Tenant API key (BRG_*_TENANT_API_KEY):**
+`node scripts/set-tenant-api-keys.js` -- otomatis generate + update DB + tulis ke .env, output ter-mask. Tidak perlu restart PM2.
+
+**B. REDIS_PASSWORD:**
+1. `openssl rand -base64 32`
+2. `read -s NEWPASS`
+3. `sed -i "s#^REDIS_PASSWORD=.*#REDIS_PASSWORD=$NEWPASS#" ~/fashion-platform/.env`
+4. Cek nomor baris: `sudo grep -n "^requirepass" /etc/redis/redis.conf`, lalu `sudo sed -i "NOMOR_BARISs#^requirepass .*#requirepass $NEWPASS#" /etc/redis/redis.conf`
+5. `unset NEWPASS`
+6. WAJIB: `pm2 restart fashion-platform --update-env` DULU, BARU `sudo systemctl restart redis-server`
+
+**C. SUPABASE_SECRET_KEY:**
+1. Dashboard Supabase > Project Settings > API Keys > tab "Secret keys" > "New secret key"
+2. `read -s NEWSUPAKEY`, lalu `sed -i "s#^SUPABASE_SECRET_KEY=.*#SUPABASE_SECRET_KEY=$NEWSUPAKEY#" ~/fashion-platform/.env`, lalu `unset NEWSUPAKEY`
+3. `pm2 restart fashion-platform --update-env`
+4. Test dulu, sukses baru hapus key lama di dashboard (ketik "default" konfirmasi)
+
+**D. DATABASE_URL (role app_user):**
+Role custom, bisa diubah langsung via SQL Editor dashboard:
+`ALTER ROLE app_user WITH PASSWORD 'password_baru';`
+Nama role cuma `app_user` polos, BUKAN pakai suffix project-ref.
+
+**E. BACKUP_DATABASE_URL (role postgres):**
+1. Dashboard > Project Settings > Database > "Reset database password" -- role postgres TIDAK bisa di-ALTER manual
+2. BUG DIKETAHUI (belum ada fix Supabase per 24 Agustus 2026): pooler kadang tolak password baru walau sudah benar. Ref: github.com/supabase/supabase/issues/44210
+3. Solusi terbukti: ulangi reset 2-3 kali, jeda beberapa menit tiap percobaan
+4. Kalau kena ECIRCUITBREAKER: stop semua percobaan (termasuk pm2 stop) 2-5 menit dulu
+5. Setelah connect sukses, update .env, restart PM2, test pakai `~/backup-db.sh` asli
+
+**PRINSIP UMUM masukin password ke shell:**
+- Pakai `read -s VARNAME`, bukan nano/vi, bukan argument command langsung
+- Verifikasi panjang: `echo -n "$VARNAME" | wc -c` sebelum dipakai
+- Jangan pakai `sed` kalau curiga ada karakter `&` di password, pakai `awk` sebagai gantinya
+- Verifikasi setelah edit: `grep -c "^VAR=" .env` harus 1, `wc -l` harus sama kayak sebelumnya
+- Jangan paste command yang nampilin isi baris mentah, pakai `grep -c` atau mask dengan `sed 's/=.*/=[ADA]/'`
+
+## 158. Persiapan SEO Awal (noindex + robots.txt) + Tutup Utang Commit Bagian 156 -- SELESAI & TERUJI (22 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Grosir (struktur SEO disiapkan sebelum ada tenant nyata pertama, mencegah subdomain kerja internal ikut ter-index Google) dan Rasa Ketelitian (sebelum menulis bagian checkpoint ini, git log/git diff/git status dicek dulu untuk verifikasi state final yang benar-benar ter-push -- bukan ditulis dari asumsi checkpoint lama. Proses ini justru menemukan utang commit nyata dari Bagian 156 yang sempat lolos 2 sesi).
+
+**Konteks:** diskusi strategi SEO jangka panjang -- disepakati item paling mendesak dieksekusi sekarang (sebelum frontend/landing page dibangun) adalah mencegah subdomain tenant (kerja internal, bukan konten publik) ikut ter-index Google.
+
+### Bagian SEO -- SELESAI & TERUJI
+1. Header X-Robots-Tag: noindex, nofollow ditambahkan via nginx add_header (sejajar 5 security header Bagian 139) ke /etc/nginx/sites-enabled/demo.benangrasa.com dan /etc/nginx/sites-enabled/api.benangrasa.com. Testing: nginx -t OK, reload, curl -sI konfirmasi header muncul di response kedua domain.
+2. Route GET /robots.txt ditambahkan di server.js (Disallow: / untuk semua crawler) -- aman tanpa syarat karena server.js ini HANYA pernah menerima request untuk subdomain tenant + api.* (domain utama benangrasa.com di-hosting terpisah di Vercel, tidak pernah menyentuh VPS ini). Testing: curl ke kedua domain mengonfirmasi isi robots.txt benar.
+
+**Catatan penting untuk next steps ke depan:** domain UTAMA (benangrasa.com, nanti di Vercel) TIDAK BOLEH pakai noindex ini -- itu yang justru harus di-index Google. Kalau bikin subdomain tenant baru selain demo, WAJIB tambahkan header yang sama secara manual saat ini (belum ada template/snippet reusable) -- pertimbangkan dibuat template config nginx supaya tidak perlu diketik ulang tiap tenant baru.
+
+### Utang commit Bagian 156 -- ditemukan & ditutup (bukan bagian dari kerjaan SEO, ditemukan saat review diff sebelum commit)
+Saat review git diff/git status sebelum commit fitur robots.txt, ditemukan beberapa perubahan yang sudah diterapkan ke VPS production sejak sesi OWASP ZAP (Bagian 156, sudah tertulis "selesai" di checkpoint saat itu) tapi TIDAK PERNAH ter-commit ke git -- lolos selama 2 commit checkpoint berikutnya (Bagian 156 dan 157 sendiri cuma commit CHECKPOINT.md, tidak menyentuh kode). Kalau VPS harus di-redeploy dari git fresh, semua perubahan ini akan hilang tanpa disadari:
+
+- app.disable('x-powered-by') di server.js
+- Cache-Control: no-cache eksplisit di endpoint /scanner.html
+- SRI (integrity+crossorigin) untuk html5-qrcode.min.js di scanner.html
+- Placeholder backendUrl di scanner.html diganti dari IP privat (192.168.1.5:3000) ke https://demo.benangrasa.com
+- Fix field mismatch staff di scanner.html (s.staff_id/s.name -> s.id/s.full_name, sisa migrasi LTOS lama)
+
+Semua ditutup lewat 2 commit terpisah (b66a73b, 04955b2) di sesi ini, plus .gitignore ditambah pola fix_*.py supaya script sekali-pakai (pola Bagian 153/154) tidak terus muncul sebagai untracked file di git status setiap sesi.
+
+**Pelajaran untuk next steps sejenis:** kalau checkpoint mencatat sesuatu "SELESAI & TERUJI" untuk perubahan kode (bukan cuma dokumentasi/infra), WAJIB verifikasi lewat git log --stat bahwa commit terkait beneran menyentuh file kode itu -- bukan cuma percaya narasi checkpoint. Commit checkpoint (CHECKPOINT.md) dan commit kode adalah 2 hal terpisah, keduanya bisa lolos tidak sinkron kalau tidak dicek eksplisit.
+
+**Next steps SEO -- BELUM DIEKSEKUSI (butuh akses akun Google/medsos langsung, di luar jangkauan VPS/kode):**
+[ ] Daftarkan domain utama benangrasa.com ke Google Search Console + verifikasi kepemilikan (bisa dilakukan sekarang walau landing page masih 404)
+[ ] Pasang Google Search Console + Google Analytics SEJAK hari pertama landing page live
+[ ] Amankan nama "Benangrasa" di Google Business Profile dan handle media sosial (Instagram/LinkedIn)
+[ ] Draft awal daftar kata kunci Bahasa Indonesia relevan (bukan Inggris): "aplikasi manajemen produksi konveksi", "sistem QC jahit online", "software tracking produksi garmen Indonesia", dst
+[ ] Halaman publik "Keamanan/Kepercayaan" saat landing page dibangun -- checkpoint sudah punya banyak bukti nyata (HTTPS Grade A+, 2FA, RLS per-tenant, restore drill, PIN lockout) sebagai trust signal B2B SaaS
+[ ] Perhatikan Core Web Vitals saat memilih framework/optimasi gambar frontend
+
+**Yang SENGAJA DITUNDA:** menulis landing page, blog konten, meta tag halaman -- menunggu desain frontend (Bagian 152, prioritas berikutnya) mulai digarap dulu.
+
+## 159. Migrasi Domain: Fashion-Platform Pindah ke rakyat.benangrasa.com, benangrasa.com untuk BTOS -- SIAP, MENUNGGU EKSEKUSI DNS FINAL (27 Agustus 2026)
+
+**Konteks:** benangrasa.com (domain utama) akan dialihkan ke BTOS (produk Deka, partner teknis Teja untuk keperluan sales/demo -- BUKAN produk Teja sendiri). Fashion-platform (proyek utama Teja) dipindah ke rakyat.benangrasa.com karena masih tahap perancangan (belum ada tenant asli, cuma demo), jadi migrasi domain di titik ini minim resiko.
+
+**PENTING -- ini mengoreksi rencana Bagian 158:** next steps SEO Bagian 158 (Google Search Console dkk untuk benangrasa.com) SUDAH TIDAK RELEVAN untuk fashion-platform -- benangrasa.com sekarang milik BTOS, bukan fashion-platform. Kalau nanti fashion-platform punya landing page, SEO-nya didaftarkan untuk rakyat.benangrasa.com, BUKAN benangrasa.com.
+
+**Sudah SELESAI & TERUJI (siap dipindah):**
+- DNS: rakyat.benangrasa.com (A record) + *.rakyat.benangrasa.com (wildcard A record) -> IP VPS 103.58.101.155
+- SSL: 1 certificate mencakup rakyat.benangrasa.com DAN *.rakyat.benangrasa.com sekaligus (certbot --manual --preferred-challenges dns, folder /etc/letsencrypt/live/rakyat.benangrasa.com-0001/). CATATAN: sertifikat ini TIDAK auto-renew (butuh --manual-auth-hook untuk itu, belum di-setup) -- expire 2026-11-25, WAJIB diperpanjang manual sebelum tanggal itu dengan mengulang command yang sama + tambah 2 TXT record DNS baru.
+- Nginx: file baru /etc/nginx/sites-available/rakyat.benangrasa.com dibuat manual (certbot SEMPAT salah taruh config awal di file `default` -- sudah dibersihkan, lihat Pelajaran di bawah), server_name mencakup domain polos + wildcard, proxy_pass ke localhost:3000 sama seperti demo/api.benangrasa.com, 5 security header + X-Robots-Tag noindex sudah disalin sama persis.
+- server.js: CORS ALLOWED_ORIGIN_PATTERNS ditambah 1 baris regex untuk *.rakyat.benangrasa.com (commit a644380), tidak mengubah pattern benangrasa.com yang lama (masih ada untuk kompatibilitas selama transisi).
+- Testing end-to-end di domain baru: /v1/whoami (tenant resolver), /v1/staff/login (Redis session + Postgres app_user), /v1/orders (RLS + tenant isolation) -- semua PASS via demo.rakyat.benangrasa.com.
+
+**Pelajaran -- certbot --nginx bisa salah sasaran:** saat run `certbot --nginx -d domain-baru` pada VPS dengan banyak virtual host terpisah, certbot bisa salah menyisipkan config SSL ke file `/etc/nginx/sites-available/default` (block generic) alih-alih file sendiri, kalau tidak ada file host yang sudah ada duluan untuk domain itu. Tandanya: `nginx -t` sukses tapi curl ke domain baru balas 404 dari nginx langsung (bukan dari aplikasi Node) karena ke-serve sebagai static file server. Solusi: buat file /etc/nginx/sites-available/nama-domain sendiri SEBELUM run certbot (isi server block kosong dulu, listen 80 saja), baru certbot --nginx akan menyisipkan config SSL ke file yang benar alih-alih ke default.
+
+**BELUM DIEKSEKUSI -- menunggu keputusan akhir Teja untuk beri lampu hijau ke Deka:**
+[ ] Deka menerima instruksi DNS dari Vercel untuk benangrasa.com (dia minta akses "penuh" -- kemungkinan termasuk wildcard *.benangrasa.com, PERLU DIKONFIRMASI ULANG karena ini akan membawa SEMUA subdomain benangrasa.com ke Vercel, termasuk demo.benangrasa.com dan api.benangrasa.com yang lama)
+[ ] Setelah DNS benangrasa.com beralih ke Vercel: HAPUS /etc/nginx/sites-enabled/demo.benangrasa.com dan api.benangrasa.com (symlink saja, file di sites-available boleh dibiarkan sebagai arsip), karena domain itu sudah tidak lagi mengarah ke VPS ini setelah DNS pindah -- membiarkan symlink aktif tidak berbahaya (nginx tidak akan pernah menerima traffic untuk host itu lagi) tapi membingungkan untuk sesi mendatang kalau tidak dibersihkan
+[ ] Setelah dipastikan tidak ada lagi traffic ke demo/api.benangrasa.com (cek log akses beberapa hari), pertimbangkan hapus juga certificate lama-nya via `certbot delete`
+[ ] Update dokumentasi lain yang mungkin masih menyebut demo.benangrasa.com/api.benangrasa.com sebagai alamat aktif (CHECKPOINT_LOCAL.md, dokumentasi eksternal kalau ada)
+
+## Bagian 160 — Audit Bersih dari Domain Lama + Perbaikan Monitoring, CORS, dan Keamanan Dasar
+
+**Konteks:** Setelah domain utama benangrasa.com dilepas penuh ke BTOS/Deka (lanjutan Bagian 159), dilakukan audit menyeluruh memastikan fashion-platform independen dari domain lama, sekaligus verifikasi ulang klaim keamanan lama di checkpoint.
+
+**1. Endpoint /health (SELESAI & TERUJI — Ketelitian, Keamanan)**
+GET /health ditambahkan di server.js setelah /robots.txt. Tanpa DB/Redis/auth, balas 200 {"status":"ok"}. Diuji via curl, terkonfirmasi.
+
+**2. Perbaikan Monitoring UptimeRobot (SELESAI & TERUJI — Ketelitian)**
+Monitor api.benangrasa.com sempat "Down 7 hari 12 jam" -- alarm palsu (UptimeRobot cuma terima 200, server balas 404 di /). Dipindah ke https://api.rakyat.benangrasa.com/health, status kembali Up.
+
+**3. Perbaikan scanner.html (SELESAI & TERUJI — Ketelitian)**
+Placeholder "ALAMAT SERVER LTOS" (baris 642) masih https://demo.benangrasa.com. Diperbaiki ke https://demo.rakyat.benangrasa.com. Backup dibuat.
+
+**4. Pembersihan CORS Whitelist (SELESAI & TERUJI — Keamanan)**
+ALLOWED_ORIGIN_PATTERNS masih percaya origin benangrasa.com polos (baris 36) -- dihapus. Sekarang hanya rakyat.benangrasa.com + subdomain dipercaya. Backup dibuat, node -c dicek, PM2 restart, /health diuji ulang 200 OK. Commit a7d2377, pushed ke GitHub.
+
+**5. Audit Menyeluruh Domain Lama (SELESAI & TERUJI — Ketelitian, Keamanan)**
+Bersih dari benangrasa.com polos: kode .js/.json/.env*, email (tidak ada fitur), OAuth (tidak ada), cookie domain (tidak dipakai), UptimeRobot (1 monitor, benar), Google Search Console (kosong, tidak pernah dipakai).
+
+**6. Audit Keamanan SSH (SELESAI & TERUJI — Keamanan)**
+PasswordAuthentication: no (efektif via sshd -T). PermitRootLogin: without-password. SSH key: ed25519. Login harian via user Rakyat. Port tetap 22 -- sengaja tidak diubah, akses VNC darurat provider terbukti sulit dipakai, resiko kekunci lebih besar dari manfaat.
+
+**7. TEMUAN KRITIS -- UFW & Fail2Ban ternyata OFF (sebagian SELESAI, sebagian PENDING -- Keamanan)**
+Checkpoint lama (baris 41, 93) mencatat "UFW default-deny" dan "Fail2Ban aktif" sebagai sudah diimplementasi. Diverifikasi ulang hari ini via sudo ufw status dan systemctl status fail2ban -- keduanya ternyata INACTIVE/DISABLED (kemungkinan mati sejak reboot server, karena fail2ban tercatat "disabled" bukan cuma "inactive"). 
+- Fail2Ban: SUDAH diperbaiki hari ini -- sudo systemctl enable fail2ban && start, sekarang active (running), terverifikasi.
+- UFW: MASIH INACTIVE, PENDING -- ditunda ke sesi berikutnya karena butuh kehati-hatian ekstra (resiko kekunci SSH kalau salah urutan rule), dan sesi ini mau berakhir/limit habis. Proteksi inti (SSH key-only, password auth mati) tetap aman sementara menunggu.
+
+**PRIORITAS TINGGI next steps:**
+- Aktifkan UFW dengan hati-hati: pastikan rule "allow SSH" (port 22) dimasukkan SEBELUM ufw enable, verifikasi tidak kekunci sebelum lanjut rule lain.
+- Setelah UFW aktif, re-audit checkpoint lama lain (baris 41, 93) untuk memastikan klaim keamanan lain juga masih valid, tidak cuma diasumsikan dari catatan lama.
+
+**Catatan keputusan domain:**
+benangrasa.com dilepas PENUH ke BTOS/Deka (permanen, bukan sementara). rakyat.benangrasa.com adalah domain PERMANEN fashion-platform ke depan. Wildcard *.benangrasa.com akan diberikan Teja ke Deka -- cleanup nginx tetap tanggung jawab Teja/sesi ini, bukan Deka.
+
+**Next steps tidak berubah dari Bagian 159:**
+- Menunggu Deka eksekusi DNS wildcard ke Vercel, lalu pantau log akses demo/api.benangrasa.com beberapa hari sebelum hapus symlink nginx + certificate lama.
+- SSL rakyat.benangrasa.com expire 25 November 2026 -- perpanjang manual (tidak auto-renew).
+
+**UPDATE Bagian 160 -- UFW berhasil diaktifkan kembali (SELESAI & TERUJI -- Keamanan)**
+UFW yang sempat ditemukan inactive kini aktif kembali: default deny incoming, allow SSH (22/tcp IPv4+IPv6), HTTP (80/tcp), HTTPS (443/tcp). Diaktifkan dengan hati-hati (rule sudah diverifikasi ada sebelum enable), koneksi SSH yang sedang berjalan tetap hidup selama proses -- tidak ada gangguan. Fail2Ban + UFW sekarang keduanya aktif, sesuai klaim awal di checkpoint lama (baris 41, 93).
+
+## 161. Upgrade nginx 1.18.0 -> 1.30.4 -- SELESAI & TERUJI (28 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Keamanan (nginx 1.18.0 sudah lama tertinggal dari upstream, upgrade menutup celah CVE yang terakumulasi) dan Rasa Ketelitian (verifikasi post-upgrade bukan cuma "service jalan" -- dicek utuh 3 domain via endpoint real, security header, server_tokens, dan auto-start persistence; klaim awal "200 OK" di root path ternyata 404 karena tidak ada route -- dikoreksi dengan test ulang ke /health).
+
+**Eksekusi:** upgrade nginx dari 1.18.0 ke 1.30.4 di VPS. 8 package modular lama (libnginx-mod-*, nginx-common, nginx-core) otomatis terhapus saat install -- sesuai ekspektasi, tidak dipakai lagi.
+
+**Testing (bukti nyata):**
+- Ketiga domain (rakyat.benangrasa.com, demo.rakyat.benangrasa.com, api.rakyat.benangrasa.com) dicek via endpoint /health -- semua 200 OK, response bersih tanpa header dobel.
+- Security header lengkap utuh (5 header Bagian 139 + X-Robots-Tag Bagian 158), CSP persis sama dengan nginx config (Bagian 156).
+- Server: nginx tanpa versi -- server_tokens off (Bagian 138) tetap efektif di versi baru.
+- Config custom (proxy_pass, SSL, security headers per-domain) kepertahankan penuh, tidak perlu ditulis ulang.
+- Zero downtime selama proses upgrade.
+- systemctl is-enabled nginx -> enabled, auto-start pasca-reboot terjamin (dicek eksplisit karena service sempat inactive setelah install).
+
+**Temuan minor terpisah (dicatat, TIDAK terkait nginx upgrade ini):** response 404 di root path (route tidak match) menampilkan 2x header Content-Security-Policy berbeda isi (satu default-src 'none', satu CSP lengkap dari nginx) -- diverifikasi endpoint asli (/health) bersih, cuma 1 CSP. grep server.js tidak menemukan CSP eksplisit di kode, kemungkinan default library pada response 404 tak ter-routing. Belum ditelusuri sumber pastinya -- mirip pola X-Content-Type-Options dobel Bagian 139, bukan prioritas.
+
+**Dicatat, TIDAK URGENT (tidak menghambat status SELESAI):**
+1. 2 service deferred restart (systemd-logind, user@1000.service) -- sengaja ditunda karena sesi SSH aktif, akan kepakai otomatis di reboot berikutnya.
+2. Warning NO_PUBKEY 7FCC7D46ACCC4CF8 dari repo PGDG muncul konsisten di beberapa apt update terakhir -- tidak terkait nginx, GPG key PGDG kemungkinan expired, worth diberesin kapan-kapan.
+
+**Status: SELESAI & TERUJI.**
