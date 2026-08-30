@@ -1028,3 +1028,22 @@ Kutipan penting dari ChatGPT: "Risiko terbesar sekarang adalah lo menghabiskan w
 **Catatan kritis dari ChatGPT soal scope produk:** disarankan MVP fokus ke satu primary workflow ("order-to-production control untuk bisnis fashion/garmen yang bekerja dengan vendor/tim produksi"), BUKAN mencoba jadi "ERP fashion lengkap" untuk semua tipe tenant (brand owner, vendor konveksi, custom tailor, pabrik, warehouse) sekaligus di tahap ini.
 
 **Status: Audit database live SELESAI (dari sisi Supabase), audit source code/API BELUM BISA DILAKUKAN (connector GitHub/Vercel gagal, kemungkinan besar karena repo sudah Private). Next steps sesi berikutnya: (1) selesaikan cara ChatGPT bisa akses source code lagi, (2) setelah itu lanjutkan audit source-level sesuai kerangka yang ChatGPT tawarkan (PRODUCT/ARCHITECTURE/SECURITY -> WORKFLOW/DATABASE/AUTH, dst), (3) pertimbangkan serius rekomendasi "jangan tambah fitur baru dulu, kunci dulu core flow P0" sebelum lanjut ide-ide besar seperti Dashboard Owner (Bagian 155).**
+
+## 164. Setup ChatGPT Codex Connector + Ganti CodeQL dengan DeepSource -- SELESAI & TERUJI (30 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (CodeQL gagal terus pasca repo Private -- ditelusuri sampai akar masalah: fitur ini butuh akun Organization + GitHub Advanced Security, BUKAN bisa diperbaiki lewat setting apapun di akun personal -- baru diputuskan ganti tool, bukan asal matiin tanpa investigasi).
+
+**ChatGPT Codex Connector -- SELESAI:** GitHub App sempat ke-authorize tapi gak ke-install (bug dikenal komunitas OpenAI -- "Accessible repositories: 0"). Diperbaiki lewat direct install URL (github.com/apps/chatgpt-codex-connector/installations/new), pilih "Only select repositories" -> fashion-platform. Terverifikasi: repo kebaca oleh ChatGPT (server.js, versioning, session, rate limiter, test files, CodeQL workflow).
+
+**CodeQL -- DIMATIKAN.** Root cause: GitHub Code Scanning (upload SARIF ke tab Security) cuma tersedia untuk repo Public ATAU repo Organization dengan GitHub Advanced Security -- akun personal + repo Private TIDAK didukung sama sekali, regardless of billing. File .github/workflows/codeql.yml dihapus.
+
+**DeepSource -- SELESAI, PENGGANTI CodeQL.** Setup: GitHub App diinstall (Only select repositories -> fashion-platform), analyzer JavaScript+Secrets+SQL diaktifkan. CLI diinstall di VPS (~/fashion-platform/bin/deepsource) via Docker (RAM impact minimal: +35Mi saat idle, jauh di bawah kekhawatiran ClamAV Bagian 148). Auth pakai Personal Access Token (90 hari, bukan Never Expire -- konsisten prinsip kredensial proyek), login via `--with-token` (device-code flow gagal di VPS headless, token-based jadi solusi).
+
+**Hasil scan pertama (`./bin/deepsource issues list`):** Mayoritas MINOR/MAJOR (gaya kode -- console.log, unused variable, cyclomatic complexity, dst), bukan celah keamanan serius. 1 temuan CRITICAL: server.js:904 "Found the usage of undeclared variables" -- BELUM DITELUSURI TUNTAS, next steps. 2 temuan "possible hardcoded secrets" di CHECKPOINT.md:813/820 -- diverifikasi FALSE POSITIVE (nyangkut ke teks SOP rotasi kredensial berisi nama variable seperti $NEWPASS, bukan kredensial asli).
+
+**PENTING -- reminder token:** Personal Access Token DeepSource expire 90 hari dari 30 Agustus 2026 (~28 November 2026). Perlu generate ulang + `./bin/deepsource auth login --with-token` ulang sebelum tanggal itu.
+
+**Next steps aktif ditambah:**
+[ ] Telusuri CRITICAL server.js:904 "undeclared variables" -- cek apakah caseRowForBroadcast/mediatorStaffIdForBroadcast/joinedCaseMessage cuma didefinisikan di dalam kondisi tertentu tapi dipakai di luar itu (mirip pola bug lama archive bagian 80)
+[ ] Renew DeepSource PAT sebelum ~28 November 2026
+[ ] Review temuan MAJOR/MINOR DeepSource lainnya (console.log, unused variable, dst) -- polish pass, gak urgent
