@@ -1047,3 +1047,30 @@ Kutipan penting dari ChatGPT: "Risiko terbesar sekarang adalah lo menghabiskan w
 [ ] Telusuri CRITICAL server.js:904 "undeclared variables" -- cek apakah caseRowForBroadcast/mediatorStaffIdForBroadcast/joinedCaseMessage cuma didefinisikan di dalam kondisi tertentu tapi dipakai di luar itu (mirip pola bug lama archive bagian 80)
 [ ] Renew DeepSource PAT sebelum ~28 November 2026
 [ ] Review temuan MAJOR/MINOR DeepSource lainnya (console.log, unused variable, dst) -- polish pass, gak urgent
+
+## 165. Verifikasi Temuan CRITICAL DeepSource server.js:904 -- FALSE POSITIVE (30 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (temuan CRITICAL dari DeepSource -- javascriptJS-0125 "usage of undeclared variables" -- tidak diterima mentah maupun ditolak mentah, ditelusuri sampai ke baris kode aslinya, dicek scope variable manual, dan divalidasi lewat node --check + cat -A sebelum disimpulkan).
+
+**Konteks:** Bagian 164 mencatat 1 temuan CRITICAL dari scan pertama DeepSource di server.js:904, dicurigai mirip pola bug lama (UUID empty-string broadcast error, archive bagian 80) karena variable caseRowForBroadcast/mediatorStaffIdForBroadcast/joinedCaseMessage disebut di baris 908-910 dekat situ.
+
+**Penelusuran:**
+1. `awk 'NR==904{print NR": "$0}' server.js` -> baris 904 isinya cuma `},` (penutup object `body`), bukan titik pemakaian variable apapun.
+2. `grep -n` ketiga variable -> dideklarasi `let` di baris 818-820 (scope fungsi callback `withTenantAndStaff`, BUKAN di dalam blok `if`), diisi bersyarat di 854-864 (di dalam `if (newStatus === "DISCREPANCY")`), dipakai di 908-910 (di scope yang sama, luar `if` tapi tetap di dalam fungsi yang sama). Kalau kondisi `if` tidak kena, nilai tetap default `null` -- tidak pernah undefined/undeclared.
+3. Pemakaian selanjutnya (baris 920: `if (result._caseRowForBroadcast && result._joinedCaseMessage)`) sudah dijaga null-check sebelum dipakai untuk broadcast.
+4. `node --check server.js` -> valid, tidak ada syntax error.
+5. `cat -A server.js` pada rentang baris 900-912 -> line ending bersih (`$` biasa), tidak ada CRLF/karakter tersembunyi yang bisa membuat DeepSource salah hitung nomor baris.
+
+**Kesimpulan: FALSE POSITIVE terverifikasi.** Kemungkinan static analyzer DeepSource salah parsing struktur nested scope (route handler -> callback `withTenantAndStaff` -> blok `if`), nomor baris yang dilaporkan (904, cuma `},`) tidak presisi ke akar masalah sebenarnya. Pola ini konsisten dengan false positive yang pernah ditemukan tools lain di proyek ini (eslint-plugin-security Bagian 140, gitleaks pada teks SOP kredensial).
+
+**Verifikasi tambahan -- status CodeQL dipastikan benar-benar mati (bukan cuma catatan checkpoint):**
+- `ls -la .github/workflows/` -> folder kosong total, tidak ada file workflow apapun.
+- `git log --oneline -- .github/workflows/codeql.yml` -> 2 commit terkonfirmasi: 41bda8e (setup awal) lalu a102d33 (dimatikan, diganti DeepSource) -- histori jelas, bukan cuma diklaim tanpa commit (beda kasus dari utang commit Bagian 158).
+- Cek GitHub Settings > Branches: tidak ada branch protection rule aktif sama sekali (halaman "New rule" kosong, belum pernah disimpan) -- dan repo Private akun personal punya warning eksplisit dari GitHub bahwa rule apapun TIDAK akan di-enforce sampai pindah ke akun Team/Enterprise Organization.
+- Cek GitHub Settings > Advanced Security: tidak ada section "Code scanning" muncul sama sekali di halaman ini (cuma ada Dependency graph + Dependabot) -- mengonfirmasi ulang root cause Bagian 164 bahwa Code Scanning/CodeQL memang tidak eligible untuk repo Private + akun personal, bukan sekadar lupa dimatikan dari sisi setting.
+
+**Status: SELESAI & TERUJI.** 1 temuan CRITICAL DeepSource dikonfirmasi false positive (dicatat, tidak perlu fix kode). CodeQL dikonfirmasi mati total dari 3 sudut berbeda (file workflow, branch protection, security settings) -- tidak ada sisa konfigurasi yang perlu dibersihkan lagi.
+
+**Next steps aktif ditambah (dari Bagian 164, item ditutup):**
+[ ] Renew DeepSource PAT sebelum ~28 November 2026
+[ ] Review temuan MAJOR/MINOR DeepSource lainnya (console.log, unused variable, dst) -- polish pass, gak urgent
