@@ -120,7 +120,7 @@ ATURAN WAJIB (14 Agustus 2026, Rasa Ketelitian): tiap kali nulis judul bagian ba
 Daftar ringkas — detail lengkap tiap ide ada di archive pada nomor bagian yang disebut:
 
 A. Visual configurator tenant konveksi — archive bagian 25
-B. QR code dual-jalur customer vs produksi — archive bagian 26
+B. QR code dual-jalur customer vs produksi + gerbang scan sebelum submit — LOGIC LENGKAP di Bagian 167 (archive bagian 26 = histori awal)
 C. Verifikasi 2 pihak staff jahit vs QC + notif WA ke QC — SEBAGIAN BESAR SUDAH DIEKSEKUSI (lihat bagian 57, 61, 71-87 di archive 2), sisanya jadi next steps aktif di atas
 D. Tenant theme settings + Pattern library & multi-format export — archive bagian 47
 E. Tenant kaos: sablon 3D + upload gambar sendiri — archive bagian 48
@@ -240,9 +240,9 @@ CARA MENCATAT IDE BARU — INSTRUKSI UNTUK SEMUA ROOM/SESI
 ===================================================================
 Kalau Teja menyampaikan ide baru di sesi manapun, room manapun WAJIB ikuti pola ini:
 
-1. Tulis ide itu sebagai BAGIAN BARU BERNOMOR (nomor lanjut dari bagian terakhir — cek dulu nomor bagian tertinggi, JANGAN tebak/asal nomor. Nomor tertinggi saat ini: 88).
+1. Tulis ide itu sebagai BAGIAN BARU BERNOMOR (nomor lanjut dari bagian terakhir — cek dulu nomor bagian tertinggi, JANGAN tebak/asal nomor. Nomor tertinggi TIDAK DITULIS statis di sini lagi -- gampang basi, sudah terbukti dari 88 ketinggalan jauh sampai sekarang. WAJIB cek dulu pakai `grep -n "^
 2. Judul bagian: "[NOMOR]. Ide Awal — [nama ide singkat] ([tanggal], BELUM DIRISET MATANG)"
-3. Isi selengkap mungkin dari hasil diskusi — TIDAK perlu diringkas saat pertama dicatat.
+3. Isi selengkap mungkin dari hasil diskusi — TIDAK perlu diringkas saat pertama dicatat. WAJIB sertakan LOGIC/ALASAN di balik tiap keputusan (bukan cuma kesimpulan akhirnya) — supaya kalau nanti ditanya ulang "kenapa dulu diputusin gini" di sesi/room manapun, jawabannya sudah tertulis, tidak perlu tanya Teja dari nol lagi. Ini prinsip permanen ditambahkan 30 Agustus 2026 setelah pola berulang: ide sempat cuma tercatat 1 baris ringkasan tanpa logic, akibatnya logic harus dijelaskan ulang tiap kali dibuka lagi.
 4. Tulis draft-nya, tunjukkan ke Teja untuk direview.
 5. Setelah disetujui, APPEND (bukan overwrite) ke CHECKPOINT.md via `cat >> CHECKPOINT.md << 'EOF' ... EOF` di VPS, verifikasi dengan `tail`, baru commit & push.
 6. TAMBAHKAN JUGA satu baris ringkasan ide itu ke daftar bagian 7 di atas.
@@ -1104,3 +1104,45 @@ Kutipan penting dari ChatGPT: "Risiko terbesar sekarang adalah lo menghabiskan w
 [ ] Draft awal ToS + Privacy Policy
 [ ] Mandat eksplisit owner->mediator kasus SERIOUS
 [ ] Renew DeepSource PAT sebelum ~28 November 2026
+
+## 167. Ide Awal — QR Code Dual-Jalur Customer vs Produksi + Gerbang Scan Sebelum Submit (30 Agustus 2026, BELUM DIRISET MATANG TEKNIS, LOGIC SUDAH DISEPAKATI)
+
+**Konteks:** ini BUKAN ide baru -- sudah tercatat sejak 9 Agustus 2026 (archive bagian 2 lanjutan, ringkasan poin B bagian 7 CHECKPOINT.md: "QR code dual-jalur customer vs produksi"), tapi sebelumnya cuma tersimpan sebagai 1 baris ringkasan tanpa logic detail -- akibatnya tiap kali dibuka lagi di sesi/room baru, logic-nya harus dijelaskan ulang dari nol ke Claude. Sesi ini didiskusikan ulang tuntas dan disepakati detailnya, DITULIS LENGKAP supaya tidak terulang lagi.
+
+**MASALAH YANG DIPECAHKAN (kenapa ide ini ada):**
+1. Staff bisa foto bukti kerjaan tanpa benar-benar mulai/pegang barang fisiknya dulu -- foto bisa diambil sembarangan waktu, tidak ada penanda "kerjaan ini resmi dimulai".
+2. Customer tidak punya cara tahu progress order mereka tanpa nanya manual ke owner/staff.
+3. Owner tidak punya cara cepat lihat "order ini sekarang lagi di tangan siapa/stage apa" tanpa buka data mentah.
+
+**LOGIC KEPUTUSAN -- QR PRODUKSI (gerbang mulai kerja):**
+- 1 kode QR per ORDER (bukan per stage, bukan per staff) -- kode yang SAMA dipakai bergantian oleh semua staff di semua stage untuk order itu (gudang, cutting, jahit, qc, finishing, dst).
+- QR ini nempel fisik di kartu kerja/label yang menyertai barang selama proses produksi.
+- ALASAN LOGIC-NYA (ini yang paling penting, sering ditanya ulang): urutan kerja WAJIB jadi scan QR dulu -> BARU boleh ambil foto bukti -> BARU submit qty. Bukan foto dulu baru isi form. Tujuannya: scan QR jadi bukti staff BENERAN pegang barang fisik itu di titik waktu itu (dia harus ada di dekat barang buat bisa scan kode fisiknya), sebelum sistem izinin dia ambil foto/submit -- mempersulit staff asal foto dari jauh atau submit tanpa benar-benar kerja.
+- Scan ini FUNGSINYA SEBAGAI GERBANG (gatekeeper) untuk membuka akses form submit -- BUKAN gantiin validasi yang sudah ada di endpoint /v1/stage-submissions (assigned_stage staff harus cocok, current_stage job harus cocok, dst tetap berlaku SEPERTI SEKARANG). QR cuma nambah SATU syarat baru di depan: harus discan dulu, baru form/endpoint submit itu bisa diakses.
+- Tiap scan QR produksi TERCATAT sebagai log/jejak: siapa (staff_id), kapan (timestamp), stage apa. Ini nyambung ke 2 kegunaan: (a) OWNER bisa lihat progress order secara real-time dari histori scan ini (order ini terakhir di-scan staff X di stage Y jam berapa), (b) jejak ini JUGA berfungsi sebagai bukti tambahan anti-kecurangan (konsisten sama Rasa Talent/Penghargaan dan ide anti-kecurangan lama archive bagian 57 lanjutan -- QR bawa nama staff sebagai kredit kerja sekaligus jejak tanggung jawab).
+
+**LOGIC KEPUTUSAN -- QR CUSTOMER (jendela progress yang disederhanakan):**
+- 1 kode QR BERBEDA per order (bukan kode yang sama dengan QR produksi), dikasih ke customer saat order dibuat.
+- ALASAN LOGIC-NYA: customer TIDAK PERLU dan TIDAK BOLEH lihat detail stage internal produksi (gudang/cutting/jahit/qc/finishing) -- kalau ditunjukkan mentah-mentah, customer bisa bingung/resah kalau lihat status "mundur" (misal kasus discrepancy bikin qc balik minta jahit ulang -- ini NORMAL secara internal tapi kalau kelihatan customer bisa disalahartikan "kok mundur, ada masalah?"). Prinsip ini konsisten dengan arahan eksplisit Teja sendiri di sesi ini ("ga perlu tau dapurnya full").
+- Status yang ditunjukkan ke customer DISEDERHANAKAN jadi 4 tahap besar (bukan 1:1 dengan 5-6 stage internal), USULAN (belum final, perlu direview Teja lagi saat eksekusi):
+  1. "Pesanan Diterima" -- order masuk, belum mulai diproses
+  2. "Sedang Disiapkan" -- mencakup stage gudang (buka siklus, keluarkan bahan) sampai cutting
+  3. "Dalam Produksi" -- mencakup jahit, qc, finishing digabung jadi satu tahap besar (sengaja disatukan supaya proses bolak-balik discrepancy internal antar stage ini tidak terlihat sebagai "mundur" oleh customer)
+  4. "Siap Dikirim" -- sudah lolos gudang tutup siklus (confirm submission finishing oleh gudang), tinggal menunggu jadwal kirim
+  5. "Dikirim" -- status akhir, sama dengan status order shipped yang sudah ada
+
+**KEPUTUSAN EKSPLISIT SOAL TIMING EKSEKUSI (penting, sering jadi pertanyaan ulang):**
+Diputuskan TIDAK dieksekusi sekarang, DITUNDA sampai next steps aktif yang sudah terbuka (bagian 5) selesai lebih dulu. Alasan konkret:
+1. Ini scope BARU yang cukup besar (butuh desain skema tabel scan log, payload QR, endpoint baru untuk gerbang scan, endpoint/halaman publik untuk customer lihat status, integrasi ke alur submission yang sudah ada) -- bukan tambalan kecil.
+2. Bagian 152 dan 163 (cross-check ChatGPT, SUDAH DISETUJUI Teja sebagai arah kerja) eksplisit merekomendasikan: selesaikan dulu semua next steps aktif yang sudah terbuka SEBELUM menambah fitur/scope baru apapun -- termasuk ide besar seperti Dashboard Owner (bagian 155) dan ide ini.
+3. ChatGPT (bagian 163) memberi peringatan eksplisit soal "architecture creep" -- sistem sudah berkembang kompleks sebelum satu order nyata terbukti bisa lewat seluruh alur tanpa masalah manual. Menambah fitur QR sekarang, sebelum core flow P0 (auth, tenant isolation, order lifecycle, spec lock, inventory reservation, production state machine, dst -- daftar lengkap di bagian 163) benar-benar dikunci dan dites tuntas, berisiko menambah lapisan kompleksitas baru di atas fondasi yang belum sepenuhnya teruji end-to-end.
+
+**BELUM DIRISET / BELUM DIPUTUSKAN (pertanyaan terbuka untuk sesi eksekusi nanti):**
+- Struktur payload QR persis (apa isi datanya -- cukup order_id terenkripsi, atau ada data lain).
+- Skema tabel buat nyimpen log scan produksi (nama tabel, kolom -- kemungkinan mirip pola production_events yang sudah ada, append-only).
+- Desain teknis endpoint gerbang scan (apakah scan generate semacam token sementara yang harus disertakan saat submit, atau cukup dicatat sebagai event terpisah yang divalidasi berurutan).
+- Desain halaman publik customer (perlu autentikasi/kode akses apa untuk buka halaman itu, atau cukup dari QR link langsung tanpa login).
+- Apakah 4 tahap besar customer di atas sudah final atau perlu direvisi saat mulai desain.
+- Nyambung ke ide/catatan terkait yang sudah ada: poin S (QR bawa nama staff + spesifikasi barang, archive bagian 57 lanjutan), Rasa Talent/Penghargaan (bagian 64), ide anti-kecurangan submission/QC (poin R, archive bagian 57 lanjutan) -- perlu direview bareng saat desain final supaya tidak dibangun sebagai 3 fitur terpisah yang mirip.
+
+**Status: LOGIC DAN KEPUTUSAN DESAIN SUDAH DISEPAKATI PENUH (bukan cuma ide mentah). Implementasi kode BELUM dimulai, sengaja ditunda sampai next steps aktif bagian 5 selesai.**
