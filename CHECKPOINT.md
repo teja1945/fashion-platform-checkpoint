@@ -1074,3 +1074,33 @@ Kutipan penting dari ChatGPT: "Risiko terbesar sekarang adalah lo menghabiskan w
 **Next steps aktif ditambah (dari Bagian 164, item ditutup):**
 [ ] Renew DeepSource PAT sebelum ~28 November 2026
 [ ] Review temuan MAJOR/MINOR DeepSource lainnya (console.log, unused variable, dst) -- polish pass, gak urgent
+
+## 166. Fix PGDG GPG Key Expired (NO_PUBKEY 7FCC7D46ACCC4CF8) -- SELESAI & TERUJI (30 Agustus 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (root cause ditelusuri sampai ketemu file rusak spesifik, bukan asal jalanin ulang add-key generik) dan Rasa Grosir (item kecil yang sudah numpuk beberapa sesi -- dicatat sejak Bagian 161 -- akhirnya dituntaskan sampai bersih, bukan dibiarkan jadi warning permanen).
+
+**Konteks:** warning NO_PUBKEY 7FCC7D46ACCC4CF8 muncul konsisten di setiap `apt update` sejak beberapa sesi lalu (dicatat pertama kali di Bagian 161), tidak menghambat apapun tapi mengganggu kebersihan output.
+
+**Root cause:** file `/etc/apt/trusted.gpg.d/apt.postgresql.org.gpg~` (perhatikan tanda `~` di akhir) berukuran 0 byte, tertanggal 8 Agustus 2026 -- sisa file backup/gagal dari proses update key yang terputus di masa lalu. Key asli (tanpa tanda `~`) sama sekali tidak ada di sistem, sehingga `apt` selalu gagal verifikasi signature repo PGDG.
+
+**Eksekusi:**
+1. File rusak dihapus: `sudo rm /etc/apt/trusted.gpg.d/apt.postgresql.org.gpg~`
+2. Key resmi PGDG didownload ulang dengan cara modern (bukan `apt-key` yang sudah deprecated di Ubuntu 22.04): `curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg`
+3. Sempat muncul error baru sementara ("File has unexpected size... Mirror sync in progress?") -- bukan masalah di VPS, murni mirror PGDG lagi sinkronisasi. Diperbaiki dengan bersihin cache lokal (`sudo rm -rf /var/lib/apt/lists/*`) lalu `apt update` ulang -- ternyata mirror sudah selesai sync, fetch berhasil normal.
+
+**Testing:** `sudo apt update` penuh (semua 9 repo aktif) -> semua `Hit` (tervalidasi), 0 warning GPG, 0 error fetch. Bersih total.
+
+**Status: SELESAI & TERUJI.**
+
+**Next steps aktif (item PGDG dicoret):**
+[ ] OWASP ZAP dynamic testing ke tenant demo
+[ ] k6 load testing endpoint confirm
+[ ] Test suite CI gate
+[ ] Audit trail admin & monitoring
+[ ] ClamAV integrasi ke endpoint /v1/photos
+[ ] 51 saran Lynis sisanya
+[ ] P0-6 -- schema/migration reproducibility
+[ ] Lapis 3 audit keamanan manusia (freelance pentester)
+[ ] Draft awal ToS + Privacy Policy
+[ ] Mandat eksplisit owner->mediator kasus SERIOUS
+[ ] Renew DeepSource PAT sebelum ~28 November 2026
