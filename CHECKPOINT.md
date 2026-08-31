@@ -1188,3 +1188,21 @@ Performance/Core Web Vitals: sudah disebut sekilas di Bagian 158 ("perhatikan Co
 Catatan keamanan yang perlu diingat saat landing page dibangun: CSP header saat ini punya connect-src * (sengaja dibuka lebar untuk fitur backendUrl custom di scanner.html, Bagian 156) -- kalau landing page publik dibangun di domain yang sama, WAJIB direview apakah CSP ini masih aman dipakai bersama atau perlu dipisah/diperketat khusus untuk halaman publik, JANGAN asal disamakan dengan config lama tanpa recheck.
 
 **Status: BELUM DIEKSEKUSI SAMA SEKALI (bug ditemukan tapi belum diperbaiki, rencana SEO/GEO baru dicatat). Next steps aktif lain (bagian 5, sudah lebih dulu terbuka) TETAP prioritas mengikuti keputusan Bagian 152/163 -- SEO/GEO ini TIDAK mendesak, dieksekusi kapan saja setelah next steps aktif utama selesai ATAU begitu sesi punya waktu luang untuk fix cepat langkah 1-5 (itu saja yang murah dan cepat, bisa dikerjakan kapan saja tanpa menunggu next steps besar lain).**
+
+## 169. P1 Fix — Validasi staff_id Satu Tenant di POST /v1/mediators (30 Agustus 2026, SELESAI KODE, BELUM DITES FUNGSIONAL)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (perubahan uncommitted dari sesi sebelumnya ditemukan tidak sengaja saat git status, ditelusuri lewat git diff, diverifikasi node --check, dan dicatat resmi -- bukan dibiarkan menggantung tanpa jejak atau langsung di-push tanpa cek).
+
+**Konteks:** perubahan ini ditemukan sebagai uncommitted changes di server.js saat sesi ini mengerjakan hal lain (Bagian 168) -- kemungkinan sisa dari sesi sebelumnya di room yang sama yang sempat kena limit sebelum sempat commit. Root cause perubahan: fix P1 dari hasil audit ChatGPT (disebutkan di komentar kode) soal endpoint POST /v1/mediators yang sebelumnya tidak memvalidasi apakah staff_id yang dikirim benar-benar milik tenant yang sama dengan admin yang memanggil endpoint.
+
+**Perubahan:** endpoint POST /v1/mediators sekarang query dulu SELECT id FROM staff WHERE id = staff_id AND is_active = true DI DALAM withTenant() (yang sudah menyetel app.tenant_id) SEBELUM insert ke tenant_mediators. Karena RLS aktif di tabel staff, kalau staff_id yang dikirim ternyata milik tenant lain, row-nya tidak akan kelihatan sama sekali dari sesi ini -- otomatis balas 404 "staff tidak ditemukan atau tidak aktif". Response pattern diubah jadi {httpStatus, body} konsisten dengan pola endpoint lain yang sudah ada (stage-submissions/confirm, dst).
+
+**Verifikasi yang SUDAH dilakukan:** node --check server.js -> valid, tidak ada syntax error. git diff dibaca penuh, logic tertutup rapi (tidak setengah jalan).
+
+**BELUM DILAKUKAN -- testing fungsional wajib di sesi berikutnya sebelum dianggap benar-benar selesai:**
+1. Test staff_id valid dari tenant yang sama -> harus 201, mediator berhasil ditambahkan
+2. Test staff_id dari tenant LAIN (skenario yang justru mau dicegah fix ini) -> harus 404, PASTIKAN tidak tembus insert
+3. Test staff_id yang tidak aktif (is_active = false) -> harus 404
+4. Test staff_id yang sama sekali tidak ada -> harus 404
+
+**Status: KODE SELESAI DAN TER-COMMIT, TESTING FUNGSIONAL BELUM DILAKUKAN.** Next steps aktif lain (bagian 5) tetap prioritas, tapi testing 4 skenario di atas untuk fix P1 ini sebaiknya dilakukan di awal sesi berikutnya sebelum lanjut ke hal lain -- ini fix keamanan (validasi tenant isolation), bukan sekadar fitur, jadi risiko kalau ternyata ada bug di logic-nya lebih tinggi daripada item next steps biasa.
