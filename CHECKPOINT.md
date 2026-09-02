@@ -94,6 +94,8 @@ Bug-bug kritis historis (sudah diperbaiki, detail di archive, jangan diulang):
 [ ] FK index yang belum ada di banyak tabel (production_events, inventory_ledger, discrepancy_cases, stage_quantity_submissions, dst) -- MEDIUM sekarang, HIGH sebelum scale (P2, detail Bagian 163 & 170)
 [ ] RLS auth_rls_initplan warning -- optimasi performa (bungkus current_setting() dengan select), BUKAN celah keamanan (P2, detail Bagian 163 & 170)
 
+[ ] Validasi discrepancy_case RESOLVED wajib ada bukti keterlibatan dari KEDUA pihak (submitter DAN receiver), bukan cukup 1 pihak -- prinsip 'dengar dua pihak sebelum putuskan', lihat Bagian 171 poin 4
+
 >>> PRINSIP BARU (2 September 2026, dari audit ChatGPT ketiga) -- BACA SEBELUM PERCAYA STATUS "SELESAI" DI CHECKPOINT MANAPUN <<<
 CHECKPOINT.md BUKAN source of truth. Source of truth = GitHub HEAD + Supabase live schema + deployed runtime.
 Alasan konkret: Bagian 169 sempat tercatat "SELESAI DAN TER-COMMIT" padahal kode fix-nya sendiri gak pernah ke-push ke GitHub -- baru ketauan lewat audit eksternal ChatGPT, baru dibenerin 2 September 2026 (git commit 7fb6c58).
@@ -697,3 +699,19 @@ tenants=2, orders=2, production_jobs=1, production_events=19, staff=5, stage_sub
 **Keputusan arsitektur penting dari ChatGPT:** masalah terbesar proyek ini BUKAN cuma bug kode -- ini "source of truth drift": GitHub code, schema file (fashion_platform_schema_v2.sql), Supabase live, scanner frontend, checkpoint, dan deployment sudah jadi versi berbeda-beda satu sama lain. Schema live sudah punya tabel seperti request_dedup, pending_events, discrepancy_cases, tenant_mediators, stage_quantity_submissions dst yang belum direpresentasikan penuh di schema file yang di-commit. Ini harus dibereskan sebelum proyek dibesarkan lagi.
 
 **Status: 14 temuan dicatat lengkap, 1 dari 14 (poin 8, fix P1 mediators) SUDAH DIBENERIN di sesi yang sama (commit 7fb6c58). 13 sisanya masuk Next Steps Aktif (Section 5) dengan urutan prioritas ChatGPT di posisi PALING ATAS, di atas next-steps yang sudah ada sebelumnya (bug robots.txt Bagian 168, testing mediator Bagian 169) -- karena levelnya menyangkut integritas data produksi & keamanan inti, bukan sekadar polish. Belum ada eksekusi kode dari 13 temuan ini, semua masih tahap pencatatan resmi.**
+
+## 171. Prinsip Diadopsi — Nilai Universal dari Rekam Jejak Kepemimpinan/Perdagangan Nabi Muhammad SAW (2 September 2026, PRINSIP PERMANEN)
+
+**Konteks:** Diadopsi sebagai penguat filosofi produk yang sudah ada (bukan Rasa ke-10 terpisah), fokus pada rekam jejak historis yang applicable universal ke bisnis/kerja apapun -- bukan aspek keagamaan. 3 dari 4 area yang didiskusikan langsung memperkuat Rasa yang sudah ada dengan contoh konkret; 1 area (penyelesaian sengketa) menghasilkan aturan kerja nyata yang masuk Next Steps Aktif.
+
+**1. Transparansi kondisi barang (memperkuat Rasa Keamanan).** Prinsip larangan menyembunyikan cacat barang dari pembeli. Menegaskan KENAPA next-steps "Integritas foto bukti -- EXIF timestamp vs waktu submission, perceptual hash" (Section 5) itu penting: bukan cuma antisipasi kecurangan staff secara teknis, tapi soal hak customer atas kondisi barang yang jujur ditampilkan.
+
+**2. Akurasi kuantitas/takaran (memperkuat Rasa Keamanan).** Prinsip "sempurnakan takaran, jangan curangi". Menegaskan urgensi fix reserve_fabric_inventory() (temuan P0 ChatGPT, Bagian 170 poin 5) -- bukan sekadar bug teknis, tapi pelanggaran prinsip dagang paling dasar kalau kuantitas bahan tidak akurat/konsisten.
+
+**3. Hak pekerja dibayar cepat & adil (memperkuat Rasa Talent/Penghargaan).** Prinsip "berikan upah pekerja sebelum keringatnya kering". Jadi arahan desain untuk ide belum matang "Sistem upah staff jahit borongan" (poin F) dan "Tipe bayaran fleksibel per tenant" (poin W, Section 7) -- begitu dieksekusi nanti, wajib utamakan kecepatan pembayaran dan keadilan perhitungan.
+
+**4. Penyelesaian sengketa adil, dengar dua pihak (memperkuat Rasa Kepemimpinan) -- INI YANG MENGHASILKAN ATURAN KERJA NYATA:** Rekam jejak sebagai penengah sengketa yang selalu dengar kedua pihak sebelum putuskan, solusi yang terasa adil bagi semua (bukan menang-kalah). LOGIC KAITAN LANGSUNG: sistem mediator/discrepancy_cases SUDAH ADA di proyek ini.
+
+**ATURAN WAJIB BARU (berlaku semua sesi ke depan):** Sebelum discrepancy_case ditutup dengan status RESOLVED, WAJIB dipastikan ada bukti keterlibatan dari KEDUA pihak (submitter DAN receiver) di discrepancy_thread_messages atau field submitter_confirmed_at/receiver_confirmed_at -- BUKAN cukup dari 1 pihak saja meski itu pihak yang melapor duluan. Endpoint resolve case perlu divalidasi ulang apakah sudah menegakkan ini; kalau belum, masuk next-steps aktif untuk ditambahkan validasinya.
+
+**Status: 3 poin pertama (dagang, hak pekerja) DIADOPSI sebagai prinsip permanen -- dirujuk saat next-steps terkait dieksekusi, TIDAK perlu kerja kode terpisah sekarang. Poin ke-4 (validasi 2 pihak sebelum resolve) MASUK Next Steps Aktif Section 5 sebagai item kerja nyata yang perlu diverifikasi/diimplementasikan.**
