@@ -78,6 +78,27 @@ Bug-bug kritis historis (sudah diperbaiki, detail di archive, jangan diulang):
 [x] Polish pass 13 pesan "internal error" generic -- SELESAI 21 Agustus 2026, lihat ARCHIVE_5 Bagian 153
 [x] PIN progressive lockout -- SELESAI 21 Agustus 2026, lihat ARCHIVE_5 Bagian 154
 
+>>> PRIORITAS TERTINGGI BARU -- AUDIT CHATGPT KETIGA (Bagian 170, 2 September 2026) <<<
+>>> Level DI ATAS prioritas robots.txt/testing mediator di bawah -- ini soal integritas data produksi & keamanan inti, bukan cuma bug kecil <<<
+[ ] 1. Lock down POST /v1/events -- WAJIB requireStaffSession, sekarang API key tenant doang cukup buat bikin production event (P0, detail Bagian 170)
+[ ] 2. Fix transaction bug di /v1/stage-submissions/:id/confirm -- withTenant() commit meski ada return error di tengah proses, resiko partial state (P0, detail Bagian 170)
+[ ] 3. Fix invariant submission.stage_key harus sama dengan production_job.current_stage saat confirm -- submission lama/basi bisa dipakai majuin stage lagi (P0, detail Bagian 170)
+[ ] 4. Rekonsiliasi event sequence 10 yang hilang di production_events (data live) -- event history saat ini TIDAK 100% replayable (P0, detail Bagian 170)
+[ ] 5. Fix semantics reserve_fabric_inventory() -- semua movement type (RESERVED/CONSUMED/RELEASED/RESTOCKED) sekarang diperlakukan sama rata sebagai pengurangan stok, stock_state juga gak keupdate (P0/P1, detail Bagian 170)
+[ ] 6. Rewrite scanner.html API contract -- masih pakai entity_id/entity_type, backend sekarang pakai production_job_id/order_id (P0, detail Bagian 170)
+[ ] 7. Samakan semua stage key -- scanner pakai sewing/packing/shipping, backend/staff live pakai jahit/finishing/shipped (P1, detail Bagian 170)
+[ ] 8. Fix Redis session revoke -- staff_sessions:* TTL gak ikut diperpanjang touchSession(), bisa expired duluan dari session token, revokeStaffSessions() jadi gak nemu token lama (P1, detail Bagian 170)
+[ ] 9. Fix race condition search_path di db.js -- SET search_path di pool.on("connect") async gak di-await, berpotensi intermittent failure di function yang butuh schema extensions seperti crypt() (P1, detail Bagian 170)
+[ ] 10. Bangun automated integration test yang aman -- test-e2e.js/test-e2e-step2.js sekarang berupa script mutasi manual ke database NYATA, bukan test yang aman dijalankan sembarangan (P2, detail Bagian 170)
+[ ] Putuskan status Vercel production -- BLOCKED, error "account configuration", root URL 404 (P1, detail Bagian 170)
+[ ] FK index yang belum ada di banyak tabel (production_events, inventory_ledger, discrepancy_cases, stage_quantity_submissions, dst) -- MEDIUM sekarang, HIGH sebelum scale (P2, detail Bagian 163 & 170)
+[ ] RLS auth_rls_initplan warning -- optimasi performa (bungkus current_setting() dengan select), BUKAN celah keamanan (P2, detail Bagian 163 & 170)
+
+>>> PRINSIP BARU (2 September 2026, dari audit ChatGPT ketiga) -- BACA SEBELUM PERCAYA STATUS "SELESAI" DI CHECKPOINT MANAPUN <<<
+CHECKPOINT.md BUKAN source of truth. Source of truth = GitHub HEAD + Supabase live schema + deployed runtime.
+Alasan konkret: Bagian 169 sempat tercatat "SELESAI DAN TER-COMMIT" padahal kode fix-nya sendiri gak pernah ke-push ke GitHub -- baru ketauan lewat audit eksternal ChatGPT, baru dibenerin 2 September 2026 (git commit 7fb6c58).
+Ke depan: SEBELUM percaya klaim "SELESAI"/"TERUJI" di checkpoint manapun (termasuk semua archive) yang menyangkut KODE atau DATA -- verifikasi dulu langsung ke git log/git diff/database live, jangan cuma percaya narasi tertulis.
+
 >>> PRIORITAS TERTINGGI SEKARANG (jangan lewatkan) <<<
 [ ] Fix bug robots.txt/noindex rakyat.benangrasa.com -- ditemukan Bagian 168, BELUM diperbaiki, 5 langkah fix sudah siap di Bagian 168
 [ ] Testing fungsional P1 fix POST /v1/mediators (4 skenario) -- kode sudah commit Bagian 169, BELUM ditest, ini fix keamanan tenant isolation
@@ -617,3 +638,60 @@ Catatan keamanan yang perlu diingat saat landing page dibangun: CSP header saat 
 4. Test staff_id yang sama sekali tidak ada -> harus 404
 
 **Status: KODE SELESAI DAN TER-COMMIT, TESTING FUNGSIONAL BELUM DILAKUKAN.** Next steps aktif lain (bagian 5) tetap prioritas, tapi testing 4 skenario di atas untuk fix P1 ini sebaiknya dilakukan di awal sesi berikutnya sebelum lanjut ke hal lain -- ini fix keamanan (validasi tenant isolation), bukan sekadar fitur, jadi risiko kalau ternyata ada bug di logic-nya lebih tinggi daripada item next steps biasa.
+
+## 170. Cross-check ChatGPT Ketiga -- Audit Live Menyeluruh (GitHub HEAD + Supabase Live + Vercel), 14 Temuan, Skor 5.5/10 (2 September 2026)
+
+**Konteks:** Cross-check independen ketiga ke ChatGPT (pola sama Bagian 152 & 163), kali ini audit LANGSUNG ke GitHub HEAD + Supabase live + Vercel -- bukan cuma baca CHECKPOINT.md. Kesimpulan keras ChatGPT: proyek ini BELUM layak dianggap production-safe, skor keseluruhan 5.5/10 untuk production readiness.
+
+### Temuan P0 (kritis, bukan kosmetik):
+
+**1. POST /v1/events tidak mewajibkan session staff.** Endpoint ini cuma pakai tenantResolver + requireApiKey, TANPA requireStaffSession -- padahal endpoint ini bisa menghasilkan event produksi kritis (STAGE_COMPLETED, STAGE_REJECTED, qc.passed, shipment.dispatched, order.cancelled, dst). Model security sekarang: API KEY saja cukup bikin production event. Seharusnya: API KEY -> STAFF SESSION -> ROLE/ASSIGNED STAGE -> PRODUCTION EVENT. ingestion.js juga menerima staff_id dari payload tanpa menjadikan session staff sebagai sumber identitas.
+
+**2. Bug transaction di /v1/stage-submissions/:id/confirm.** Urutan: submission diubah CONFIRMED/DISCREPANCY -> discrepancy case bisa dibuat -> stage dicoba dimajukan -> kalau resolveStageTransition() gagal, kode return object error dari callback. MASALAH: withTenant() melihat callback selesai NORMAL (karena return, bukan throw) -> COMMIT, bukan rollback. Komentar kode bilang "semuanya atomic" tapi implementasinya belum menjamin itu. Database bisa masuk keadaan setengah sukses.
+
+**3. Submission lama bisa dipakai memajukan stage lagi.** Saat confirm, kode cek submission.status == PENDING_QC, TAPI tidak ada validasi submission.stage_key == production_jobs.current_stage. Skenario: stage jahit, ada Submission A dan B sama-sama stage jahit. Confirm A -> stage jadi qc. Confirm B (yang lama, submission basi dari stage jahit) -> tetap bisa jadi trigger stage berikutnya (qc -> finishing), padahal B seharusnya sudah tidak relevan. Perlu invariant: submission.stage_key = production_job.current_stage pada saat confirm.
+
+**4. Event history live punya lubang sequence.** Production job utama: current_version=20, next_sequence_version=20, gap_status=CLOSED. Tapi event yang ada di database cuma: 1-9, 11-20 -- sequence 10 HILANG, dan stale_event_log tidak menjelaskan event tersebut. Ini bukan teori, data production live memang menunjukkan chain tidak lengkap. Database sekarang SUDAH punya trigger blokir UPDATE/DELETE ke production_events (append-only aman ke depan), tapi data historis sudah terlanjur punya hole. Kalau sistem butuh rebuild projection dari event log, sequence 10 jadi masalah.
+
+**5. Inventory function salah secara semantik.** reserve_fabric_inventory() SELALU melakukan current_quantity - p_quantity, TIDAK PEDULI jenis movement (RESERVED/STOCK_CONSUMED/RELEASED/RESTOCKED) -- semuanya diperlakukan sebagai pengurangan stok. Seharusnya beda-beda efek per jenis movement. Function juga TIDAK mengubah stock_state. Contoh nyata dari live DB: Katun Combed 30s quantity=70 meter, stock_state=AVAILABLE, tapi ledger-nya RESERVED 30 meter dengan order_id=NULL -- audit trail belum kuat. JANGAN lanjut bangun automation produksi di atas inventory ini sebelum semantics dikunci.
+
+**6. Scanner.html tidak sinkron sama backend (API contract mismatch).** scanner.html masih pakai entity_id/entity_type, sementara backend sekarang pakai production_job_id/order_id. Contoh: POST /v1/lock/acquire dari scanner kirim {entity_id}, tapi backend expect {production_job_id}. Frontend dan backend sekarang bicara kontrak API yang beda.
+
+**7. Stage naming mismatch.** Scanner pakai nama stage: sewing, packing, shipping. Pipeline live pakai: jahit, finishing, shipped. Staff live juga assigned_stage="jahit" tapi scanner define "sewing" -- bisa menghasilkan STAGES.find(...) => undefined, lalu UI coba baca property dari object yang gak ada. Scanner bukan cuma belum cantik -- secara kontrak data sudah tertinggal dari backend.
+
+**8. Fix P1 yang diklaim selesai ternyata BELUM ada di GitHub (SUDAH DIBENERIN 2 September 2026).** Checkpoint sempat klaim "validasi staff_id mediator satu tenant sudah selesai" (Bagian 169), tapi commit terakhir saat itu (59ba55d) cuma mengubah CHECKPOINT.md -- server.js di GitHub masih versi lama tanpa validasi. Ditemukan lewat audit ini, diverifikasi via `git diff server.js`, dikonfirmasi memang fix yang benar tapi ketinggalan gak ke-commit. LANGSUNG DIPERBAIKI di sesi yang sama: commit 7fb6c58. Pelajaran besar dari temuan ini: JANGAN jadikan CHECKPOINT sebagai source of truth -- source of truth harus GitHub HEAD + Supabase live schema + deployed runtime (lihat prinsip baru di Section 5).
+
+### Temuan P1 (perlu diperbaiki, bukan P0):
+
+**9. Session Redis punya bug revoke jangka panjang.** sessionStore.js bikin key session:<token> dan staff_sessions:<tenant>:<staff>. touchSession() cuma memperpanjang TTL session token, TTL staff_sessions:* TIDAK ikut diperpanjang. Akibat: staff masih aktif & terus di-touch, tapi staff_sessions set bisa expired duluan -> revokeStaffSessions() gak nemu referensi token lama yang masih valid.
+
+**10. db.js punya race kecil pada search_path.** pool.on("connect") menjalankan client.query("SET search_path TO public, extensions") tapi query ini async dan TIDAK di-await sebelum connection dipakai. Beberapa kode bergantung pada crypt() dari schema extensions. Bukan bug yang pasti muncul tiap request, tapi bisa jadi intermittent production failure. Solusi: schema-qualify function (extensions.crypt, dll) atau pastikan search_path konfigurasi deterministik.
+
+**11. Vercel saat ini tidak sehat.** Project status live=false, deployment terbaru BLOCKED (target=production), error link menunjuk ke "account configuration" (bukan build error). Root URL yang dicek menghasilkan 404 NOT_FOUND. Ini harus dibedakan dari backend VPS yang merupakan jalur runtime utama sekarang.
+
+### Temuan P2 (optimasi, tidak kritis untuk data masih kecil):
+
+**12. Live Supabase justru bagian paling sehat.** RLS ENABLED di semua tabel relevan (orders, staff, production_jobs, production_events, inventory, pending_events, stale_event_log, discrepancy_cases, notifications, tenant_mediators, dst). anon/authenticated TIDAK punya SELECT privilege langsung. Security advisor: 0 security lint. Fondasi database exposure relatif baik.
+
+**13. Performance advisor banyak temuan.** Banyak foreign key belum punya index (orders_order_id, production_jobs_order_id, production_events.production_job_id, inventory_ledger.fabric_inventory_id, discrepancy_cases.*_staff_id, stage_quantity_submissions.*_staff_id, dst). Juga ada warning auth_rls_initplan (current_setting() dievaluasi berulang per-row). Belum terasa di data kecil sekarang, akan terasa di skala 100 tenant/1000 order per tenant/100rb event.
+
+**14. Testing masih sangat lemah.** package.json: npm test -> "Error: no test specified". Tidak ada test suite formal. Yang ada test-e2e.js/test-e2e-step2.js yang memakai UUID tenant/order NYATA dari database dan melakukan mutation langsung -- ini lebih mirip manual production mutation script daripada automated test, berbahaya kalau dijalankan ke database yang salah.
+
+### Konteks tambahan dari audit -- ukuran data live saat audit:
+tenants=2, orders=2, production_jobs=1, production_events=19, staff=5, stage_submissions=8, discrepancy_cases=5, pending_events=0, active_locks=0. Data masih sangat kecil -- JANGAN simpulkan "sistem aman karena sekarang tidak error", karena volume belum cukup besar untuk memunculkan masalah concurrency/performance.
+
+### Urutan prioritas yang disarankan ChatGPT (disepakati jadi urutan next-steps, lihat Section 5):
+1. Lock down /v1/events
+2. Fix stage-submission transaction
+3. Fix stale submission / stage invariant
+4. Rekonsiliasi event sequence 10
+5. Fix inventory semantics
+6. Rewrite scanner API contract
+7. Samakan semua stage key
+8. Fix Redis session revoke
+9. Buat automated integration tests
+10. Baru lanjut fitur SaaS (Frontend, Backend Inventory, Dashboard Owner, dst)
+
+**Keputusan arsitektur penting dari ChatGPT:** masalah terbesar proyek ini BUKAN cuma bug kode -- ini "source of truth drift": GitHub code, schema file (fashion_platform_schema_v2.sql), Supabase live, scanner frontend, checkpoint, dan deployment sudah jadi versi berbeda-beda satu sama lain. Schema live sudah punya tabel seperti request_dedup, pending_events, discrepancy_cases, tenant_mediators, stage_quantity_submissions dst yang belum direpresentasikan penuh di schema file yang di-commit. Ini harus dibereskan sebelum proyek dibesarkan lagi.
+
+**Status: 14 temuan dicatat lengkap, 1 dari 14 (poin 8, fix P1 mediators) SUDAH DIBENERIN di sesi yang sama (commit 7fb6c58). 13 sisanya masuk Next Steps Aktif (Section 5) dengan urutan prioritas ChatGPT di posisi PALING ATAS, di atas next-steps yang sudah ada sebelumnya (bug robots.txt Bagian 168, testing mediator Bagian 169) -- karena levelnya menyangkut integritas data produksi & keamanan inti, bukan sekadar polish. Belum ada eksekusi kode dari 13 temuan ini, semua masih tahap pencatatan resmi.**
