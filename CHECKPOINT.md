@@ -828,5 +828,5 @@ Ini murni catatan konteks, bukan item kerja teknis -- tidak masuk hitungan Next 
 Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari sekali). Seri A lebih sering muncul karena lebih SEO-friendly.
 
 **Tracker progress (update tiap habis posting, catat nomor terakhir tiap seri biar gak keulang/ke-skip):**
-- Seri A terakhir: belum ada (mulai dari #1)
+- Seri A terakhir: #1 — "Kain Gue Udah Dipotong Belum?" (masalah visibilitas progress order ke vendor konveksi + CTA platform tracking), dipost 3 September 2026
 - Seri B terakhir: belum ada (belum mulai)
