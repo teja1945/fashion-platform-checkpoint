@@ -83,7 +83,7 @@ Bug-bug kritis historis (sudah diperbaiki, detail di archive, jangan diulang):
 [ ] 1. Lock down POST /v1/events -- WAJIB requireStaffSession, sekarang API key tenant doang cukup buat bikin production event (P0, detail Bagian 170)
 [ ] 2. Fix transaction bug di /v1/stage-submissions/:id/confirm -- withTenant() commit meski ada return error di tengah proses, resiko partial state (P0, detail Bagian 170)
 [ ] 3. Fix invariant submission.stage_key harus sama dengan production_job.current_stage saat confirm -- submission lama/basi bisa dipakai majuin stage lagi (P0, detail Bagian 170)
-[ ] 4. Rekonsiliasi event sequence 10 yang hilang di production_events (data live) -- event history saat ini TIDAK 100% replayable (P0, detail Bagian 170)
+[x] 4. Rekonsiliasi event sequence 10 -- SELESAI, lihat Bagian 173 (didokumentasikan, bukan bug aktif, tidak perlu fix kode)
 [ ] 5. Fix semantics reserve_fabric_inventory() -- semua movement type (RESERVED/CONSUMED/RELEASED/RESTOCKED) sekarang diperlakukan sama rata sebagai pengurangan stok, stock_state juga gak keupdate (P0/P1, detail Bagian 170)
 [ ] 6. Rewrite scanner.html API contract -- masih pakai entity_id/entity_type, backend sekarang pakai production_job_id/order_id (P0, detail Bagian 170)
 [ ] 7. Samakan semua stage key -- scanner pakai sewing/packing/shipping, backend/staff live pakai jahit/finishing/shipped (P1, detail Bagian 170)
@@ -715,3 +715,84 @@ tenants=2, orders=2, production_jobs=1, production_events=19, staff=5, stage_sub
 **ATURAN WAJIB BARU (berlaku semua sesi ke depan):** Sebelum discrepancy_case ditutup dengan status RESOLVED, WAJIB dipastikan ada bukti keterlibatan dari KEDUA pihak (submitter DAN receiver) di discrepancy_thread_messages atau field submitter_confirmed_at/receiver_confirmed_at -- BUKAN cukup dari 1 pihak saja meski itu pihak yang melapor duluan. Endpoint resolve case perlu divalidasi ulang apakah sudah menegakkan ini; kalau belum, masuk next-steps aktif untuk ditambahkan validasinya.
 
 **Status: 3 poin pertama (dagang, hak pekerja) DIADOPSI sebagai prinsip permanen -- dirujuk saat next-steps terkait dieksekusi, TIDAK perlu kerja kode terpisah sekarang. Poin ke-4 (validasi 2 pihak sebelum resolve) MASUK Next Steps Aktif Section 5 sebagai item kerja nyata yang perlu diverifikasi/diimplementasikan.**
+
+---
+
+## Bagian 172 (2 Sept 2026) — P0 #1 SELESAI SEBAGIAN: lock down POST /v1/events
+
+**Yang tertutup:**
+- Wajib `x-staff-token` valid (`requireStaffSession`) buat POST /v1/events — sebelumnya API key doang cukup (celah temuan audit ChatGPT ketiga, Bagian 170).
+- Token dari tenant lain ditolak 403 (`session.tenantId !== req.tenantId`).
+- `staff_id` yang trigger event disisipkan ke `payload.triggered_by_staff_id` (cuma kalau payload valid object, bukan array — validasi lama `validateEvent()` tetap jalan normal).
+
+**BELUM tertutup (sengaja ditunda, lihat Next Steps):**
+- Belum ada validasi "staff ini berhak kirim event_type ini". Staff jahit yang login sah tetap bisa kirim `order.cancelled`/`payment.received` tanpa ditolak.
+- `triggered_by_staff_id` nempel di payload jsonb, bukan kolom khusus (`production_events` tidak punya kolom actor eksplisit).
+
+**Bukti verbatim:**
+- Commit: `8d516a5`
+- Test 1 (tanpa token) → `401 {"error":"sesi tidak ditemukan, silakan login ulang"}`
+- Test 2 (token tenant demo dipakai request ke host demo2) → `403 {"error":"sesi ini bukan untuk tenant ini"}`
+- Test 3 (token valid) → `201 {"eventId":"8a73be97-0feb-4526-9b39-909b869da2d8","sequenceVersion":21,"applied":true}`, diverifikasi langsung ke DB (payload berisi `triggered_by_staff_id: "35afaab6-8095-4763-9029-ba22aaa23607"`)
+
+## Ide Awal baru: Refactor Modular Monolith (usulan ChatGPT ketiga)
+
+server.js sekarang monolit nanganin banyak domain sekaligus (auth, tenant, orders, production, events, locks, inventory, submissions, mediator, notifications) dalam 1 file.
+
+Usulan struktur: `modules/` per domain (auth, tenants, orders, production, inventory, shipping, notifications, customers) — tetap 1 backend + 1 database (modular monolith, BUKAN microservices, biar gak overengineering buat ukuran proyek solo dev sekarang). Domain `production` dipecah lagi jadi jobs/events/stages/locks/submissions/recovery.
+
+Urutan refactor kalau nanti dijalankan: server.js → app.js + routes/ + middleware/ → modules/ (production duluan, paling kritis) → orders/inventory/shipping/notifications.
+
+**KEPUTUSAN: DITUNDA** sampai semua 10 item P0/P1 (Bagian 170) + test suite otomatis (item #10) selesai duluan. Alasan: refactor sambil masih ada bug lama berisiko mindahin kekacauan, bukan beresin; refactor tanpa test suite rawan regresi diam-diam. Manfaat sampingan ditunda: role-per-event-type (next-step di atas) nanti bisa ditempatkan rapi di `production/service.js` pas refactor jalan, bukan tersebar di route handler kayak sekarang.
+
+## Next Steps Aktif — update status
+
+- ~~P0 #1: lock down POST /v1/events~~ → **SELESAI SEBAGIAN**, lihat Bagian 172 di atas.
+- **[BARU]** Role-per-event-type validation untuk POST /v1/events — staff yang lolos `requireStaffSession` belum dicek apakah berhak trigger event_type spesifik. Butuh diskusi desain per event_type (siapa boleh kirim apa) sebelum dikerjakan. Rencana ditempatkan di production service pas refactor modular nanti.
+- P0 #2 (transaction bug di /v1/stage-submissions/:id/confirm) — BELUM DIMULAI, jadi prioritas berikutnya.
+
+---
+
+## SOP BARU (2 Sept 2026) — Prioritas belajar/paham, bukan cuma cepat kelar
+
+User (Teja) memutuskan proyek ini gak harus buru-buru kejual/laku — walaupun setahun ke depan, gpp. Fokusnya "nabung" pemahaman programming, bukan cuma progres fitur. Berlaku sebagai ATURAN KERJA WAJIB semua sesi ke depan:
+
+1. **Sebelum nulis/apply kode, jelasin dulu konsepnya** — kenapa masalahnya terjadi, apa alternatif solusinya, bukan langsung lompat ke command siap-pakai.
+2. **Kasih kesempatan user nebak/coba dulu** sebelum dikasih jawaban lengkap, terutama buat bug/keputusan desain yang mirip pola yang sudah pernah dibahas.
+3. **Sesekali user yang nulis kode sendiri** (bagian yang sudah familiar/berulang), Claude cukup kasih kerangka, bukan kode jadi.
+4. Trade-off: proses jadi lebih lambat dari sebelumnya — ini disadari dan diterima user. Kalau ada kondisi darurat/deadline, user bisa minta mode cepat sementara (opt-out per momen, bukan ganti SOP permanen).
+
+**Tujuan akhirnya:** user bisa ngurai dan jelasin sendiri kode fashion-platform ke orang lain (misal tenant/klien) tanpa selalu tergantung ke Claude.
+
+---
+
+## Bagian 173 (2 Sept 2026) — P0 #4 DITUTUP: sequence 10 hilang, TIDAK BISA dan TIDAK PERLU dipulihkan
+
+**Kesimpulan investigasi (bukan bug aktif, kasus lama sudah pernah dibongkar tuntas di Bagian ~105-110, dikonfirmasi ulang sekarang):**
+
+- Root cause: bug di kode LAMA `ingestEvent()` (9 Agustus 2026) yang sudah DIHAPUS TOTAL sejak Bagian 110. Nomor urut sempat "dijatah" tapi baris event-nya gagal ke-insert (transaksi rollback) — bukan data yang terhapus, tapi data yang memang tidak pernah tersimpan sama sekali. TIDAK ADA di backup manapun karena kejadian aslinya memang tidak pernah terjadi.
+- Cuma menyentuh 1 job TESTING/DEMO (production_job_id `25352257-4cff-4377-85d7-2a63b05146fe`, "Customer Demo Tenant 1") — BUKAN data customer nyata.
+- Kode sekarang (`versioning.js`, `assignVersionAndStoreInTx`) sudah atomic (FOR UPDATE lock + insert-event-dan-update-counter dalam 1 transaksi) — bug spesifik ini TIDAK BISA terjadi lagi.
+- `production_events` sekarang append-only (trigger blokir UPDATE/DELETE) — proteksi tambahan ke depan.
+- `reset-job.js` (versi lama sempat hardcode `current_version = 5`, sumber gap PALSU tambahan) sudah diperbaiki jadi `current_version = next_sequence_version` (dinamis) — tidak lagi bikin gap kelihatan tiap kali dipakai reset job demo untuk testing.
+
+**KEPUTUSAN FINAL: dibiarkan apa adanya, TIDAK ditambal event placeholder.** Job ini murni demo/testing, tidak akan pernah di-replay untuk kebutuhan produksi nyata. Kalau nanti ada job CUSTOMER ASLI mengalami hole serupa (seharusnya tidak mungkin lagi dengan kode sekarang), opsi "isi event placeholder penjelasan di posisi hole" harus dipertimbangkan ulang saat itu — beda kasus, beda keputusan.
+
+**Syarat WAJIB sebelum onboarding tenant asli pertama:** script manual darurat (`reset-job.js` dan sejenisnya) hanya boleh dipakai untuk job demo/testing. TIDAK BOLEH dijalankan langsung ke job customer nyata. Perbaikan job customer asli harus lewat endpoint API resmi yang sudah ada validasi/lock-nya, bukan tembak query langsung ke database.
+
+**STATUS P0 #4: SELESAI** (rekonsiliasi = keputusan didokumentasikan, bukan perbaikan kode, karena tidak ada kode yang perlu diperbaiki lagi).
+
+---
+
+## ATURAN WAJIB BARU (3 Sept 2026) — JANGAN PERNAH minta command yang bisa nampilin token/key mentah
+
+**Insiden:** `git remote -v` dijalankan buat cek repo, ternyata nampilin GitHub PAT mentah di URL origin (`https://ghp_xxx@github.com/...`), ke-paste ke chat AI. Token itu langsung dianggap bocor, harus di-revoke + diganti token baru.
+
+**Root cause:** token disimpan LANGSUNG di URL remote git (`https://TOKEN@github.com/...`), bukan di credential helper terpisah. Command sesimpel `git remote -v` otomatis nampilin token itu tanpa disadari.
+
+**ATURAN WAJIB berlaku semua sesi ke depan, untuk Claude manapun yang bantu proyek ini:**
+1. Sebelum minta user jalankan command apapun, pikirkan dulu: "apakah command ini BERPOTENSI nampilin isi credential (token, API key, password, PIN, connection string dengan password di dalamnya)?" Kalau iya, JANGAN kasih command itu mentah-mentah.
+2. Kalau command itu memang perlu dijalankan buat tujuan lain (misal `git remote -v` buat cek nama remote), WAJIB kasih versi yang di-mask (pakai `sed`, `cut`, atau sejenisnya) SEBELUM user jalankan yang pertama kali — jangan nunggu kejadian dulu baru dikasih tau cara mask-nya.
+3. Command yang WAJIB selalu di-mask atau dihindari sama sekali kalau outputnya dikirim ke chat: `git remote -v` (kalau URL simpan token), `env`/`printenv` tanpa filter, `cat .env`, `history` (bisa ada command lama yang isi kredensial), `psql` connection string yang ada password di dalamnya.
+4. Solusi jangka panjang yang sebaiknya diterapkan: pindahkan credential dari URL git ke git credential helper terpisah (`git config credential.helper store` atau sejenisnya) — supaya `git remote -v` otomatis aman ditampilkan tanpa perlu mask manual tiap kali. INI MASIH BELUM DIKERJAKAN, next-step terpisah kalau user mau.
+5. Kalau kejadian bocor kayak gini terulang, cukup ikuti alur yang sudah terbukti di insiden ini: revoke token lama di GitHub Settings > Developer Settings > Personal access tokens, generate token baru dengan scope MINIMAL yang dibutuhkan (untuk kebutuhan push/pull kode biasa, cukup scope `repo` saja, TIDAK perlu `admin:org`), lalu `git remote set-url origin https://<TOKEN_BARU>@...` dijalankan LANGSUNG oleh user di terminalnya sendiri, tidak pernah dikirim ke chat.
