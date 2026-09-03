@@ -799,12 +799,12 @@ User (Teja) memutuskan proyek ini gak harus buru-buru kejual/laku — walaupun s
 
 ---
 
-## ATURAN WAJIB BARU (3 Sept 2026) — WAJIB grep checkpoint dulu sebelum bikin langkah/SOP baru
+## ATURAN WAJIB BARU (3 Sept 2026, DIPERLUAS) — WAJIB cek SOP checkpoint SEBELUM MULAI PEKERJAAN APAPUN, bukan cuma tugas administratif
 
 **Insiden:** Claude diminta sync CHECKPOINT.md ke repo public, langsung improvisasi langkah manual (ls, cp, cd, git diff) padahal SOP lengkapnya SUDAH ADA dari sebelumnya (baris ~419, 1 command siap pakai). User yang nyadar dan nanya "kenapa jadi manual, bukannya udah ada SOP-nya" — bukan Claude yang nyadar duluan.
 
-**Kelemahan yang harus diperbaiki:** Claude (di sesi manapun) punya kecenderungan langsung improvisasi/bikin langkah baru dari nol untuk tugas yang KELIHATAN belum ada prosedurnya, padahal belum tentu benar-benar belum ada -- cuma belum dicek dulu ke checkpoint.
+**Kelemahan yang harus diperbaiki:** Claude (di sesi manapun) punya kecenderungan langsung improvisasi/bikin langkah baru dari nol untuk tugas yang KELIHATAN belum ada prosedurnya, padahal belum tentu benar-benar belum ada -- cuma belum dicek dulu ke checkpoint. User eksplisit minta ini JANGAN dibatasi ke tugas administratif/infra saja -- berlaku untuk SEMUA jenis pekerjaan.
 
-**ATURAN WAJIB:** Sebelum menyusun langkah kerja untuk tugas yang sifatnya rutin/administratif/infrastruktur (sync file, deploy, backup, restart service, rotate kredensial, dst), WAJIB `grep` dulu CHECKPOINT.md (dan CHECKPOINT_ARCHIVE_*.md kalau perlu) cari SOP yang relevan. Kalau ketemu, PAKAI itu, jangan bikin jalur baru sendiri walau kelihatan "lebih hati-hati". Kalau SOP yang ada ternyata kurang lengkap/perlu diperbaiki, itu didiskusikan dulu ke user sebagai perubahan SOP, bukan diam-diam diganti jalur lain.
+**ATURAN WAJIB (cakupan luas, semua jenis pekerjaan):** Di AWAL mengerjakan apapun -- fix bug, bikin fitur baru, investigasi masalah, tugas administratif/infra, sampai hal kecil -- WAJIB dulu `grep`/telusuri CHECKPOINT.md (dan CHECKPOINT_ARCHIVE_*.md kalau perlu) cari apakah sudah ada SOP/keputusan/pola kerja yang relevan untuk hal itu. Kalau ketemu, PAKAI itu, jangan bikin jalur baru sendiri walau kelihatan "lebih hati-hati" atau "lebih modern". Kalau SOP yang ada ternyata kurang lengkap/perlu diperbaiki, itu didiskusikan dulu ke user sebagai perubahan SOP, bukan diam-diam diganti jalur lain. Ini berlaku SEBELUM baca kode, SEBELUM nulis fix, SEBELUM kasih command apapun ke user.
 
-Ini konsisten dengan prinsip lama "CHECKPOINT bukan source of truth tapi WAJIB dicek dulu" (Bagian 170) -- prinsip itu ternyata sempat dilanggar sendiri oleh Claude di insiden sync ini.
+Ini konsisten dengan prinsip lama "CHECKPOINT bukan source of truth tapi WAJIB dicek dulu" (Bagian 170) -- prinsip itu ternyata sempat dilanggar sendiri oleh Claude di insiden sync ini, dan sekarang diperjelas cakupannya supaya tidak terulang di jenis pekerjaan lain.
