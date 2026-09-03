@@ -796,3 +796,15 @@ User (Teja) memutuskan proyek ini gak harus buru-buru kejual/laku — walaupun s
 3. Command yang WAJIB selalu di-mask atau dihindari sama sekali kalau outputnya dikirim ke chat: `git remote -v` (kalau URL simpan token), `env`/`printenv` tanpa filter, `cat .env`, `history` (bisa ada command lama yang isi kredensial), `psql` connection string yang ada password di dalamnya.
 4. Solusi jangka panjang yang sebaiknya diterapkan: pindahkan credential dari URL git ke git credential helper terpisah (`git config credential.helper store` atau sejenisnya) — supaya `git remote -v` otomatis aman ditampilkan tanpa perlu mask manual tiap kali. INI MASIH BELUM DIKERJAKAN, next-step terpisah kalau user mau.
 5. Kalau kejadian bocor kayak gini terulang, cukup ikuti alur yang sudah terbukti di insiden ini: revoke token lama di GitHub Settings > Developer Settings > Personal access tokens, generate token baru dengan scope MINIMAL yang dibutuhkan (untuk kebutuhan push/pull kode biasa, cukup scope `repo` saja, TIDAK perlu `admin:org`), lalu `git remote set-url origin https://<TOKEN_BARU>@...` dijalankan LANGSUNG oleh user di terminalnya sendiri, tidak pernah dikirim ke chat.
+
+---
+
+## ATURAN WAJIB BARU (3 Sept 2026) — WAJIB grep checkpoint dulu sebelum bikin langkah/SOP baru
+
+**Insiden:** Claude diminta sync CHECKPOINT.md ke repo public, langsung improvisasi langkah manual (ls, cp, cd, git diff) padahal SOP lengkapnya SUDAH ADA dari sebelumnya (baris ~419, 1 command siap pakai). User yang nyadar dan nanya "kenapa jadi manual, bukannya udah ada SOP-nya" — bukan Claude yang nyadar duluan.
+
+**Kelemahan yang harus diperbaiki:** Claude (di sesi manapun) punya kecenderungan langsung improvisasi/bikin langkah baru dari nol untuk tugas yang KELIHATAN belum ada prosedurnya, padahal belum tentu benar-benar belum ada -- cuma belum dicek dulu ke checkpoint.
+
+**ATURAN WAJIB:** Sebelum menyusun langkah kerja untuk tugas yang sifatnya rutin/administratif/infrastruktur (sync file, deploy, backup, restart service, rotate kredensial, dst), WAJIB `grep` dulu CHECKPOINT.md (dan CHECKPOINT_ARCHIVE_*.md kalau perlu) cari SOP yang relevan. Kalau ketemu, PAKAI itu, jangan bikin jalur baru sendiri walau kelihatan "lebih hati-hati". Kalau SOP yang ada ternyata kurang lengkap/perlu diperbaiki, itu didiskusikan dulu ke user sebagai perubahan SOP, bukan diam-diam diganti jalur lain.
+
+Ini konsisten dengan prinsip lama "CHECKPOINT bukan source of truth tapi WAJIB dicek dulu" (Bagian 170) -- prinsip itu ternyata sempat dilanggar sendiri oleh Claude di insiden sync ini.
