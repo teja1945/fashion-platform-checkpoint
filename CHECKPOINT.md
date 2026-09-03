@@ -808,3 +808,14 @@ User (Teja) memutuskan proyek ini gak harus buru-buru kejual/laku — walaupun s
 **ATURAN WAJIB (cakupan luas, semua jenis pekerjaan):** Di AWAL mengerjakan apapun -- fix bug, bikin fitur baru, investigasi masalah, tugas administratif/infra, sampai hal kecil -- WAJIB dulu `grep`/telusuri CHECKPOINT.md (dan CHECKPOINT_ARCHIVE_*.md kalau perlu) cari apakah sudah ada SOP/keputusan/pola kerja yang relevan untuk hal itu. Kalau ketemu, PAKAI itu, jangan bikin jalur baru sendiri walau kelihatan "lebih hati-hati" atau "lebih modern". Kalau SOP yang ada ternyata kurang lengkap/perlu diperbaiki, itu didiskusikan dulu ke user sebagai perubahan SOP, bukan diam-diam diganti jalur lain. Ini berlaku SEBELUM baca kode, SEBELUM nulis fix, SEBELUM kasih command apapun ke user.
 
 Ini konsisten dengan prinsip lama "CHECKPOINT bukan source of truth tapi WAJIB dicek dulu" (Bagian 170) -- prinsip itu ternyata sempat dilanggar sendiri oleh Claude di insiden sync ini, dan sekarang diperjelas cakupannya supaya tidak terulang di jenis pekerjaan lain.
+
+---
+
+## Catatan Non-Teknis: Rencana Branding (3 Sept 2026)
+
+Proyek ini santai, tidak dikejar buru-buru laku (lihat SOP belajar/paham). Paralel dengan pengerjaan teknis, user mulai bangun branding lewat Instagram:
+- Frekuensi: 2-3x seminggu, bentuk konten fleksibel (1 video ATAU 2 caption + gambar)
+- Tujuan: biar proyek makin dikenal orang pelan-pelan, meski akun Instagram masih baru
+- Target optimasi: SEO (pencarian/explore Instagram) DAN GEO (Generative Engine Optimization -- biar kejawab kalau orang nanya ke AI)
+
+Ini murni catatan konteks, bukan item kerja teknis -- tidak masuk hitungan Next Steps Aktif.
