@@ -819,3 +819,14 @@ Proyek ini santai, tidak dikejar buru-buru laku (lihat SOP belajar/paham). Paral
 - Target optimasi: SEO (pencarian/explore Instagram) DAN GEO (Generative Engine Optimization -- biar kejawab kalau orang nanya ke AI)
 
 Ini murni catatan konteks, bukan item kerja teknis -- tidak masuk hitungan Next Steps Aktif.
+
+### Struktur Seri Konten (3 Sept 2026)
+
+**Seri A — "Masalah Konveksi"** (edukasi masalah produksi garmen, SEO/GEO-friendly, target: calon tenant pemilik konveksi)
+**Seri B — "Progress Bikin Produk"** (behind the scenes bikin fashion-platform, target: kepercayaan + developer)
+
+Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari sekali). Seri A lebih sering muncul karena lebih SEO-friendly.
+
+**Tracker progress (update tiap habis posting, catat nomor terakhir tiap seri biar gak keulang/ke-skip):**
+- Seri A terakhir: belum ada (mulai dari #1)
+- Seri B terakhir: belum ada (belum mulai)
