@@ -830,3 +830,41 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 **Tracker progress (update tiap habis posting, catat nomor terakhir tiap seri biar gak keulang/ke-skip):**
 - Seri A terakhir: #1 — "Kain Gue Udah Dipotong Belum?" (masalah visibilitas progress order ke vendor konveksi + CTA platform tracking), dipost 3 September 2026
 - Seri B terakhir: belum ada (belum mulai)
+
+## 174. Fix P0 #2 (Transaction Bug Confirm) + Sistem Eskalasi Bertingkat Job Stuck-Stage -- SELESAI & TERUJI (4 September 2026)
+
+**Rasa yang dipenuhi:**
+- **Rasa Ketelitian** — bug asli direproduksi langsung lewat API (bukan cuma dibaca dari kode), setiap constraint/RLS/pola existing dicek dulu sebelum nulis kode baru (grep dependency, cek pg_constraint, cek pg_policies), lupa restart pm2 ketauan sendiri dari hasil test yang janggal (bukan diklaim "selesai" padahal belum aktif), dan bug RLS tersembunyi (notifikasi ke non-owner selalu gagal diam-diam) ketemu lewat debug logging sengaja, bukan diasumsikan "pasti kerja".
+- **Rasa Customer Service** — staff yang sudah kerja benar (qty valid) tidak lagi disuruh submit ulang kalau step majukan stage gagal karena error teknis; response API jujur kasih tau "tim akan dikabari", bukan pura-pura sukses atau nyalahin staff.
+- **Rasa Grosir** — mediator/admin di sistem eskalasi didesain OPSIONAL sejak awal (tenant boleh pakai penuh/separuh/tidak sama sekali), bukan diasumsikan wajib ada; fallback ke owner dibuat eksplisit dan jujur di log/notifikasi, bukan diam-diam gagal kalau tenant belum setting.
+
+**Konteks masalah (dari audit ChatGPT ketiga Bagian 170, P0 #2):** endpoint `POST /v1/stage-submissions/:id/confirm` — kalau `resolveStageTransition()` gagal (misal `pipeline_snapshot` job tidak sinkron dengan `current_stage`), kode lama cuma `return { httpStatus: 400, ... }`, BUKAN `throw`. `withTenantAndStaff` (db.js) cuma peduli `throw` untuk mutuskan ROLLBACK — `return` biasa dianggap sukses, jadi tetap COMMIT. Akibatnya: update status submission (CONFIRMED/DISCREPANCY) dan insert `discrepancy_cases` (kalau ada) tetap tersimpan permanen walau API bilang error, padahal komentar kode lama salah klaim "semuanya atomic, tidak ada lagi kemungkinan submission CONFIRMED tapi stage gagal maju diam-diam".
+
+**Keputusan desain (didiskusikan bertahap dengan user):**
+- BUKAN rollback total (staff tidak disuruh submit ulang kerjaan yang sudah benar).
+- Submission & discrepancy_case tetap commit; job production ditandai `stage_advance_status='STUCK'` dengan `stage_advance_error` tersimpan.
+- Staff lain/job lain tidak terganggu -- hanya job yang stuck yang "ditahan" progressnya. Submission baru ke job yang sama sementara masuk status `BLOCKED_JOB_STUCK` (kolom/status disiapkan, belum ada UI/endpoint konsumsi -- next step).
+- Notifikasi bertingkat, BUKAN nunggu 24 jam: T+15 menit reminder ke owner, T+30 menit eskalasi ke mediator `has_full_mandate=true` (fallback admin, fallback lagi ke owner kalau dua-duanya tidak ada -- Rasa Grosir), T+45 menit broadcast ke SEMUA pihak berwenang (owner+admin+mediator aktif) sekaligus sebagai tingkat akhir otomatis.
+
+**Implementasi:**
+1. Migration (4x via Supabase MCP, project `fashion-platform` / `kwhybffbcqopqbbnuigg`): kolom `stage_advance_status/error/stuck_at/escalation_level` di `production_jobs`; status `BLOCKED_JOB_STUCK` ditambahkan ke constraint `stage_quantity_submissions_status_check`; trigger_type `stage_advance_stuck` ditambahkan ke constraint `notifications_trigger_type_check`; nilai `BROADCAST_ALL` ditambahkan ke constraint escalation_level.
+2. `server.js`: endpoint confirm diubah -- kasus `resolution.error` sekarang UPDATE job jadi STUCK + insert notifikasi T+0 ke owner (di dalam transaksi yang sama, pola sama seperti endpoint `summon-owner`) + tetap `httpStatus 200` dengan pesan jujur ke staff. Ditambah fungsi `broadcastToTenantOwners()` (generik, beda dari `broadcastToDiscrepancyCase` yang butuh konteks case) untuk push realtime WS ke owner yang online.
+3. `worker.js`: fungsi baru `checkStuckJobsForTenant`/`checkStuckJobs`/`startStuckJobMonitor` -- pola SAMA PERSIS `checkGaps` yang sudah ada (advisory lock terpisah `771101`, loop `getActiveTenantIds`, `withTenant` per tenant), interval cek tiap 60 detik. 3 tingkat eskalasi dengan fallback owner kalau mediator/admin kosong.
+4. Commit: `5d4af07` (di-amend dari `03ff006` karena pesan commit awal kepotong akibat karakter tanda kurung/kutip bikin bash salah parse `-m` inline -- pelajaran: pesan commit panjang/kompleks harus lewat file + `git commit -F`, bukan `-m` inline).
+
+**Bug KEDUA ditemukan & diperbaiki di tengah proses (bukan cuma yang direncanakan):** RLS policy `notifications_insert_scoped` ternyata cuma izinkan INSERT kalau recipient role `owner`, ATAU `source_table='discrepancy_cases'` dengan recipient pihak terlibat case itu. Notifikasi baru kita (`source_table='production_jobs'`) ke admin/mediator SELALU ditolak RLS diam-diam -- 1 INSERT gagal bikin SELURUH transaksi rollback (termasuk update escalation_level), jadi tier 2 (ke mediator/admin beneran) dan tier 3 (broadcast semua) tidak akan PERNAH berhasil sebelum fix ini, walau logic kodenya sudah benar. Ketemu lewat debug logging (`err.stack`) sengaja ditambahkan sementara setelah testing natural (nunggu waktu asli lewat, bukan cuma backdate manual) menunjukkan job macet di `ESCALATED` selama berjam-jam padahal seharusnya sudah `BROADCAST_ALL`. Fix: migration tambahan `allow_stuck_job_notifications_to_admin_and_mediators` -- tambah kondisi OR baru di policy untuk `source_table='production_jobs'` mengizinkan recipient owner/admin/mediator aktif.
+
+**Testing end-to-end (bukan cuma unit test, di tenant demo `8ae20661-626d-42c9-b930-6c926ca3ce99`):**
+- Submission asli lewat API (login staff jahit -> upload foto dummy JPEG valid -> submit qty) -> job `current_stage` sengaja dirusak jadi nilai tidak ada di `pipeline_snapshot` -> confirm via API staff QC beneran. Percobaan PERTAMA (sebelum pm2 di-restart) membuktikan bug ASLI: submission ke-CONFIRMED walau response API bilang error -- bukti nyata bug P0 #2, bukan teori.
+- Setelah pm2 restart + kode baru aktif: percobaan KEDUA (submission fresh) sukses sesuai desain -- job STUCK, notifikasi T+0 ke owner, response 200 dengan `warning` jujur.
+- Worker 3-tingkat divalidasi dengan kombinasi backdate manual `stage_advance_stuck_at` DAN waktu asli yang lewat natural selama sesi (worker jalan otomatis di background) -- tier 1 (reminder owner), tier 2 (fallback owner karena tenant demo memang belum setting mediator/admin), tier 3 (broadcast ke owner + mediator non-owner "Staff Packing Demo" role `staff`, kasus persis yang tadinya diblokir RLS) semua terverifikasi lewat query database langsung, bukan cuma baca log.
+
+**Known issue BELUM TUNTAS (jangan dianggap selesai, jangan lupa dicek lagi ke depan):** Error transient `invalid input syntax for type uuid: ""` muncul 1x dari sekitar 240 tick worker selama testing (~4 jam), tepat sesaat setelah restart pm2, lalu self-healed di tick berikutnya (transaksi rollback bersih via `withTenant`, tidak ada data korup -- jaring pengaman bekerja seperti didesain). Dicurigai kuirk Session Pooler Supabase saat koneksi pool baru dibuat pasca-restart (lihat komentar terkait `search_path` di `db.js`). Belum berhasil direproduksi ulang secara sengaja untuk investigasi lebih lanjut.
+
+**Status: SELESAI & TERUJI.** P0 #2 dari 13 temuan audit ChatGPT ketiga (Bagian 170) sekarang **DITUTUP**. Sisa dari 13 temuan: P0 #3, #5, #6, P1 #8-9 (Redis, search_path race), P2 #10 (test suite).
+
+**Next steps aktif ditambah:**
+[ ] Investigasi error transient "invalid input syntax for type uuid: ''" kalau muncul lagi -- belum reproducible, dipantau dulu di log produksi
+[ ] Belum ada UI/endpoint yang mengonsumsi status submission `BLOCKED_JOB_STUCK` -- staff belum punya cara resmi lihat "job ini pernah stuck, submit ulang" selain lewat notifikasi
+[ ] Lanjut ke P0 #3 (13 temuan audit ChatGPT ketiga, Bagian 170) sebagai prioritas berikutnya
+[ ] 1 kerentanan Dependabot moderate terdeteksi GitHub saat push commit 5d4af07 -- belum ditelusuri, cek https://github.com/teja1945/fashion-platform/security/dependabot/1
