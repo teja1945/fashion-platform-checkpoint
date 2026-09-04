@@ -868,3 +868,26 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 [ ] Belum ada UI/endpoint yang mengonsumsi status submission `BLOCKED_JOB_STUCK` -- staff belum punya cara resmi lihat "job ini pernah stuck, submit ulang" selain lewat notifikasi
 [ ] Lanjut ke P0 #3 (13 temuan audit ChatGPT ketiga, Bagian 170) sebagai prioritas berikutnya
 [ ] 1 kerentanan Dependabot moderate terdeteksi GitHub saat push commit 5d4af07 -- belum ditelusuri, cek https://github.com/teja1945/fashion-platform/security/dependabot/1
+
+## 175. Eksplorasi WhatsApp Cloud API untuk Notifikasi Stuck-Job -- TERBLOKIR, PENDING BANDING FACEBOOK (4 September 2026)
+
+**Konteks:** Pelengkap ide untuk sistem eskalasi Bagian 174 -- notifikasi eskalasi (T+15/30/45 menit) saat ini cuma masuk tabel `notifications` + broadcast WebSocket in-app. Owner tenant yang jarang buka dashboard tapi rutin buka WhatsApp berpotensi tidak sadar ada job stuck. WhatsApp Cloud API (resmi dari Meta, gratis untuk service conversation, berbayar murah ~Rp20/pesan untuk business-initiated utility message) dieksplorasi sebagai kanal notifikasi tambahan.
+
+**Progress yang SUDAH tercapai (murni di sisi Meta, BELUM ada kode diubah sama sekali):**
+- Akun Facebook baru dibuat khusus keperluan teknis (terpisah dari akun Instagram branding `suarakyat1945` sesuai prinsip pemisahan kredensial proyek).
+- Meta Business Portfolio "Benangrasa" berhasil dibuat.
+- App Developer "Benangrasa Notifikasi" berhasil dibuat, use case "Terhubung dengan pelanggan melalui WhatsApp" sudah disetujui.
+- Nomor telepon uji WhatsApp (gratis, masa aktif 90 hari) sudah didapat -- ID nomor telepon: `1354786407709524`, WhatsApp Business Account ID: `1431265412235167`.
+- Nomor WhatsApp pribadi user sudah diverifikasi sebagai penerima uji coba (via OTP).
+
+**TERBLOKIR di langkah generate token akses:** setelah user pilih scope "Hanya setujui Akun WhatsApp saat ini" (prinsip minim-akses, sesuai pola token GitHub scope minimal), akun Facebook yang baru dibuat kena restriksi otomatis oleh sistem Facebook (redirect ke `facebook.com/checkpoint`, pesan "Anda mengajukan banding", estimasi waktu peninjauan ~1 jam). Dugaan penyebab: pola aktivitas "akun baru dibuat + langsung banyak aksi teknis dalam waktu singkat" (bikin Business Manager, App Developer, WhatsApp API access) mirip pola yang di-flag sistem anti-spam/fraud Facebook -- BUKAN indikasi ada yang salah dari sisi proyek/kode.
+
+**PENTING -- belum ada risiko kredensial:** token akses BELUM sempat digenerate sama sekali sebelum restriksi ini terjadi, jadi tidak ada token yang perlu di-rotate/cabut.
+
+**Status saat checkpoint ini ditulis:** menunggu hasil banding Facebook (~1 jam sejak diajukan 4 September 2026, sore hari). BELUM DIKETAHUI apakah akan disetujui otomatis atau perlu tindakan lanjutan.
+
+**Next steps aktif ditambah:**
+[ ] Cek status banding akun Facebook setelah ~1 jam -- kalau disetujui, lanjut generate token akses dari titik terakhir (Penyiapan API -> Buat token akses)
+[ ] Kalau banding ditolak: pertimbangkan strategi alternatif (akun Facebook yang sudah "berumur"/pernah dipakai wajar, bukan akun baru sekali pakai)
+[ ] Setelah token akses berhasil didapat: integrasi ke `worker.js` (fungsi `notifyStaffList` sudah ada sebagai basis, tinggal tambah pemanggilan WhatsApp Cloud API di titik notifikasi tier 2/3, ambil nomor dari kolom `staff.phone_number` yang sudah ada)
+[ ] Belum ada keputusan: notifikasi WhatsApp ini untuk SEMUA tier (1/2/3) atau cukup tier darurat (broadcast T+45 menit) saja -- perlu didiskusikan sebelum implementasi
