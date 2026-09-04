@@ -891,3 +891,27 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 [ ] Kalau banding ditolak: pertimbangkan strategi alternatif (akun Facebook yang sudah "berumur"/pernah dipakai wajar, bukan akun baru sekali pakai)
 [ ] Setelah token akses berhasil didapat: integrasi ke `worker.js` (fungsi `notifyStaffList` sudah ada sebagai basis, tinggal tambah pemanggilan WhatsApp Cloud API di titik notifikasi tier 2/3, ambil nomor dari kolom `staff.phone_number` yang sudah ada)
 [ ] Belum ada keputusan: notifikasi WhatsApp ini untuk SEMUA tier (1/2/3) atau cukup tier darurat (broadcast T+45 menit) saja -- perlu didiskusikan sebelum implementasi
+
+## 176. Fix robots.txt/noindex rakyat.benangrasa.com -- SELESAI & TERUJI (4 September 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (rencana fix lama dari Bagian 168 dicek ulang ke kode/config aktual dulu sebelum eksekusi, bukan asumsi masih akurat -- ternyata memang masih akurat persis, tapi tetap diverifikasi; testing wajib ke 3 host dijalankan sebelum diklaim selesai, bukan cuma nginx -t sukses).
+
+**Konteks:** Melanjutkan serah-terima Bagian 168 (30 Agustus 2026). Domain produksi `rakyat.benangrasa.com` (polos, akan jadi landing page publik) terblokir total dari Google karena 2 root cause: (1) route `/robots.txt` di `server.js` masih balas `Disallow: /` untuk semua host tanpa kecuali -- komentar lama yang jadi dasarnya sudah tidak valid sejak migrasi domain Bagian 159, dan (2) header `X-Robots-Tag: noindex, nofollow` di nginx ke-copy ke domain polos juga padahal seharusnya cuma untuk subdomain tenant/api.
+
+**Fix diterapkan (ikut 6 langkah yang sudah disiapkan Bagian 168, tanpa improvisasi jalur baru):**
+1. `server.js`: route `/robots.txt` diubah dinamis berdasarkan `req.hostname` -- exact-match ke `rakyat.benangrasa.com` balas `Allow: /`, host lain (subdomain apapun) tetap balas `Disallow: /`. SENGAJA tidak reuse `extractSubdomain()` dari `middleware/tenantResolver.js` karena fungsi itu pakai aturan generik ">=3 bagian hostname = ada subdomain" yang dikalibrasi untuk root domain 2-bagian biasa -- `rakyat.benangrasa.com` sendiri sudah 3 bagian sebagai root produksi, jadi aturan generiknya akan salah kalau dipakai di sini.
+2. nginx `/etc/nginx/sites-enabled/rakyat.benangrasa.com`: 1 server block gabungan (domain polos + wildcard subdomain) dipecah jadi 2 server block terpisah -- domain polos tanpa `X-Robots-Tag`, wildcard subdomain tetap dengan `X-Robots-Tag noindex` seperti sebelumnya.
+3. Commit `b0166a1` (perubahan `server.js` -- nginx config bukan bagian repo git, cuma di VPS).
+
+**Insiden kecil saat eksekusi (langsung dikoreksi, dicatat biar tidak terulang):** Backup file nginx config sempat dibuat DI DALAM `/etc/nginx/sites-enabled/` (`rakyat.benangrasa.com.bak-bagian168-...`) -- ternyata nginx otomatis me-load SEMUA file di folder itu (beda dari backup kode `.bak` di direktori project yang aman diam saja), jadi config lama ikut kebaca bareng config baru dan bikin warning "conflicting server name". Terdeteksi dari `nginx -t` sebelum reload (bukan setelah, jadi tidak sempat berdampak ke produksi). **Pelajaran untuk sesi berikutnya:** backup file nginx/config sistem manapun (bukan cuma file kode project) HARUS disimpan di luar folder yang otomatis di-load (dipakai `/etc/nginx/backups/` sekarang), TIDAK boleh disimpan dengan pola sama seperti backup kode biasa.
+
+**Testing (Langkah 5, wajib sebelum dianggap selesai):** curl ke 3 host, dibandingkan header `X-Robots-Tag` dan isi `robots.txt`:
+- `rakyat.benangrasa.com` (polos): TIDAK ADA `X-Robots-Tag`, `robots.txt` = `Allow: /` -- sekarang BISA diindex Google.
+- `demo.rakyat.benangrasa.com`: `X-Robots-Tag: noindex, nofollow` tetap ada, `robots.txt` = `Disallow: /` -- tidak ada regresi.
+- `api.rakyat.benangrasa.com`: sama seperti demo -- tidak ada regresi.
+
+**Status: SELESAI & TERUJI.** Sesuai catatan Bagian 168, Langkah 6 (rencana SEO/GEO lengkap: Google Search Console, Analytics, riset keyword Bahasa Indonesia, schema markup JSON-LD, dst) masih dicatat di sana sebagai next step terpisah -- BELUM mendesak, dieksekusi kapan saja setelah landing page publik benar-benar dibangun (saat ini rakyat.benangrasa.com polos belum punya halaman konten apapun, cuma robots.txt yang sudah benar).
+
+**Next steps aktif ditambah:**
+[ ] Rencana SEO/GEO lengkap (Bagian 168, Langkah 6) -- tidak mendesak, tunggu landing page publik dibangun
+[ ] Lanjut ke item prioritas berikutnya: testing fungsional P1 fix POST /v1/mediators (Bagian 169), atau 13 temuan audit ChatGPT ketiga (Bagian 170) sisa P0 #3/#5/#6
