@@ -934,3 +934,47 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 
 **Next steps aktif ditambah:**
 [ ] Lanjut ke sisa 13 temuan audit ChatGPT ketiga (Bagian 170): P0 #3, #5, #6, P1 #8-9 (Redis, search_path race), P2 #10 (test suite)
+
+## 178. Cross-check ChatGPT Keempat -- Audit Live Menyeluruh (GitHub HEAD + Supabase Live + Vercel), 5 September 2026
+
+**Konteks:** Cross-check independen keempat (pola sama Bagian 152/163/170), dilakukan setelah Bagian 174/176/177 selesai. ChatGPT cek langsung ke GitHub HEAD (commit 347deb6), Supabase live schema, dan Vercel deployment status -- bukan cuma baca CHECKPOINT.md.
+
+**Apresiasi temuan lama yang dikonfirmasi SELESAI:**
+- P0 lock down POST /v1/events -- selesai (tapi P1 baru terbuka: staff_id terbukti login di tenant, TAPI belum tervalidasi role/assigned_stage yang sesuai event_type/stage-nya -- misal staff QC secara konsep masih bisa kirim event yang harusnya cuma boleh stage lain).
+- Transaction bug stage-submissions (P0 #2, Bagian 174) -- dikonfirmasi 🟢 secara kode dan testing tercatat, TAPI ChatGPT menekankan belum akan disebut 100% selesai sebelum integration test masuk CI (bukan cuma manual E2E).
+- RLS notifications yang sempat error saat testing Bagian 174 -- ChatGPT eksplisit bilang "historical failure ≠ current failure", TIDAK dihitung sebagai bug aktif karena sudah diperbaiki dan diverifikasi Bagian 177. Dicatat di sini sebagai bukti audit ini membaca histori dengan benar, bukan asal flag ulang.
+
+**TEMUAN BARU yang perlu ditindaklanjuti (belum pernah dicatat sebelumnya):**
+
+1. **Stage invariant belum dipaksa (P0):** `stage_quantity_submissions.stage_key` dan `production_jobs.current_stage` bisa berbeda saat confirm. Aturan bisnis yang seharusnya dipaksa: `submission.stage_key == production_jobs.current_stage` PERSIS pada saat confirmation -- kalau tidak, submission lama/stale secara teori bisa dipakai untuk menggerakkan state yang salah.
+
+2. **Inventory semantics (P0/P1):** tabel `fabric_inventory` dan `inventory_ledger` sudah ada dengan 4 jenis movement (RESERVED, STOCK_CONSUMED, RELEASED, RESTOCKED), tapi dicurigai semuanya diperlakukan sebagai operasi "kurangi stok" yang sama -- padahal secara logika beda arah (RESERVED pindah AVAILABLE->RESERVED, STOCK_CONSUMED konsumsi beneran, RELEASED lepas reservasi, RESTOCKED nambah stok). Kalau salah ditangani, angka inventory bisa KELIHATAN jalan tapi stock truth-nya salah. **PERINGATAN EKSPLISIT: jangan bikin dashboard inventory sebelum invariant ini diperbaiki dan diverifikasi.**
+
+3. **Redis session TTL bug (P1):** `createSession()` bikin 2 key -- `session:<token>` dan `staff_sessions:<tenant>:<staff>`. `touchSession()` cuma perpanjang TTL `session:<token>`, TIDAK ikut perpanjang `staff_sessions:*`. Akibatnya kalau staff aktif lama (misal 8+ jam terus-terusan touch session), `staff_sessions:*` bisa expired duluan walau token masih hidup -- `revokeStaffSessions()` jadi kehilangan daftar token yang seharusnya di-revoke.
+
+4. **`db.js` search_path race condition (P1, KEMUNGKINAN BESAR terkait known issue Bagian 174):** `pool.on("connect", (client) => { client.query("SET search_path...").catch(...) })` -- callback ini TIDAK di-await, jadi ada kemungkinan request pertama yang pakai koneksi baru itu jalan SEBELUM search_path selesai di-set. Ini cocok dengan pola error transient `invalid input syntax for type uuid: ""` yang tercatat di Bagian 174 (muncul cuma sekali tepat setelah restart pm2, saat banyak koneksi baru dibikin bareng). **BELUM DIVERIFIKASI langsung -- baru dugaan kuat berdasarkan kecocokan pola, perlu investigasi lanjutan sebelum dianggap pasti.**
+
+5. **Schema reproducibility (masalah besar, bukan sekadar teknis kecil):** live database sekarang punya 31 tabel public, banyak yang TIDAK ada di file schema utama repo (`fashion_platform_schema_v2.sql`) -- termasuk `tenant_mediators`, `mediator_backups`, `mediator_reassignment_log`, `discrepancy_cases`, `discrepancy_thread_messages`, `discrepancy_thread_photos`, `notifications`, `stage_quantity_submissions`, dll. Pertanyaan kunci: "kalau database mati total dan cuma punya repo, apakah bisa dibangun ulang production secara deterministic?" -- jawaban saat ini BELUM BISA dipastikan YES.
+
+6. **Automated testing masih kosong (P0 gap):** `package.json` masih `"test": "echo \"Error: no test specified\" && exit 1"`. Ada `test-e2e.js`/`test-e2e-step2.js` tapi itu manual E2E yang memutasi database nyata, BUKAN automated regression suite yang bisa jalan di CI.
+
+7. **Vercel masih BLOCKED:** project `fashion-platform` di Vercel, deployment production terbaru `readyState = BLOCKED`. Belum ada production customer-facing web application yang live (`framework: null`). Backend jauh lebih maju daripada frontend.
+
+8. **Performance advisor Supabase (bukan security, tapi perlu dibereskan sebelum scale):** banyak unindexed foreign keys (`production_events.production_job_id`, `production_jobs.order_id`, `inventory_ledger.fabric_inventory_id`, `stage_quantity_submissions.submitted_by_staff_id`, `discrepancy_cases.submitter_staff_id`, dst) dan banyak RLS policy masih pakai `current_setting(...)` langsung di predicate (disarankan dibungkus `(select current_setting(...))` untuk optimisasi query planner).
+
+9. **In-memory rate limiter di `ingestion.js`:** ada `rateBuckets = new Map()` dengan `RATE_LIMIT_PER_SEC = 1000` yang terpisah dari Express rate limiter global dan Redis rate limiter. Bukan P0 sekarang (masih single instance), tapi tidak konsisten dengan keputusan sebelumnya untuk pindahkan state penting ke Redis -- kalau nanti multi-instance, limit ini jadi tidak lagi global per instance.
+
+**Skor dari audit ini (evenhandedness, keempat sudut disebut jujur termasuk yang masih 🔴):** Backend architecture 7.5/10, Security architecture 7.5/10, Data integrity 5.5/10, Testing 3.5/10, Production readiness 5/10.
+
+**Urutan kerja yang disarankan ChatGPT (dicatat sebagai referensi, BELUM disepakati sebagai keputusan final proyek):** (1) fix stage_key invariant, (2) fix inventory semantics, (3) fix Redis session TTL, (4) fix db.js search_path race, (5) schema/migration reproducibility, (6) integration test suite, (7) OWASP ZAP, (8) k6 load test, (9) FK indexes, (10) baru frontend/customer flow, (11) baru dashboard owner. Penekanan eksplisit: **jangan lompat ke dashboard owner atau fitur besar lain sebelum P0/P1 data-integrity + reproducibility + testing ditutup dulu.**
+
+**Status: TEMUAN DICATAT, BELUM ADA YANG DIEKSEKUSI.** Sengaja diparkir dulu di akhir sesi panjang (Bagian 174-177 sudah menguras banyak waktu/fokus) -- dilanjutkan di sesi berikutnya yang lebih segar, bukan dipaksa lanjut sekarang.
+
+**Next steps aktif ditambah (urutan mengikuti saran ChatGPT di atas, bisa didiskusikan ulang sebelum eksekusi):**
+[ ] Investigasi db.js search_path race condition -- cek dulu berapa banyak tempat pool.connect() dipanggil langsung sebelum desain fix (kemungkinan butuh refactor ke wrapper function, bukan cuma 1 baris, karena Session Pooler Supabase sudah pernah bikin ALTER ROLE approach tidak cukup -- lihat komentar db.js)
+[ ] Fix stage_key invariant (submission.stage_key harus == production_jobs.current_stage saat confirm)
+[ ] Fix inventory semantics (4 jenis movement tidak boleh diperlakukan sama)
+[ ] Fix Redis session TTL (staff_sessions:* harus ikut diperpanjang di touchSession())
+[ ] Schema/migration reproducibility -- live DB 31 tabel vs schema repo yang jauh lebih tua
+[ ] Automated test suite masuk CI (bukan cuma manual E2E)
+[ ] FK index + RLS init-plan performance cleanup (tidak urgent, tapi jangan ditunda sampai scale)
