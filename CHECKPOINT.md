@@ -915,3 +915,22 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 **Next steps aktif ditambah:**
 [ ] Rencana SEO/GEO lengkap (Bagian 168, Langkah 6) -- tidak mendesak, tunggu landing page publik dibangun
 [ ] Lanjut ke item prioritas berikutnya: testing fungsional P1 fix POST /v1/mediators (Bagian 169), atau 13 temuan audit ChatGPT ketiga (Bagian 170) sisa P0 #3/#5/#6
+
+## 177. Testing Fungsional P1 Fix POST /v1/mediators -- SELESAI & TERUJI (4-5 September 2026)
+
+**Rasa yang dipenuhi:** Rasa Ketelitian (4 skenario wajib dari Bagian 169 dijalankan lewat API asli, bukan cuma baca kode; hasil skenario paling kritis -- staff_id tenant lain -- diverifikasi ulang langsung ke database, bukan cuma percaya response API; data test dibersihkan setelah selesai, tidak dibiarkan nyangkut).
+
+**Konteks:** melanjutkan Bagian 169 (30 Agustus 2026) -- fix P1 validasi tenant isolation di POST /v1/mediators sudah ter-commit tapi 4 skenario testing wajib belum dijalankan.
+
+**Setup data test:** dibuat 1 staff aktif di tenant `demo2` (`88a6d5f5-c43a-46cf-a97c-a70e17a4cb42`, untuk skenario cross-tenant) dan 1 staff nonaktif di tenant `demo` (`eb48e666-0569-4557-be44-5d9d890430b1`, untuk skenario staff tidak aktif) -- keduanya dihapus lagi setelah testing selesai.
+
+**Hasil 4 skenario (semua LULUS sesuai ekspektasi):**
+1. staff_id valid tenant sama (Staff Jahit Demo) -> HTTP 201, mediator berhasil dibuat dengan data lengkap.
+2. staff_id dari tenant LAIN (`demo2`) -> HTTP 404 "staff tidak ditemukan atau tidak aktif". Diverifikasi ulang langsung ke `tenant_mediators` -- 0 baris, PASTI tidak ada insert yang tembus. Ini skenario PALING KRITIS karena ini persis celah yang mau dicegah fix P1 ini, dan RLS terbukti bekerja benar.
+3. staff_id tidak aktif -> HTTP 404, sesuai ekspektasi.
+4. staff_id tidak ada sama sekali -> HTTP 404, sesuai ekspektasi.
+
+**Status: SELESAI & TERUJI.** Fix P1 (validasi tenant isolation di POST /v1/mediators) dari Bagian 169 sekarang terverifikasi FUNGSIONAL, bukan cuma valid secara syntax. Data test sudah dibersihkan, tidak ada residu di tenant demo/demo2.
+
+**Next steps aktif ditambah:**
+[ ] Lanjut ke sisa 13 temuan audit ChatGPT ketiga (Bagian 170): P0 #3, #5, #6, P1 #8-9 (Redis, search_path race), P2 #10 (test suite)
