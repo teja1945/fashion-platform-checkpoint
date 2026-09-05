@@ -978,3 +978,22 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 [ ] Schema/migration reproducibility -- live DB 31 tabel vs schema repo yang jauh lebih tua
 [ ] Automated test suite masuk CI (bukan cuma manual E2E)
 [ ] FK index + RLS init-plan performance cleanup (tidak urgent, tapi jangan ditunda sampai scale)
+
+## 179. Update Bagian 175 -- Diagnosa Lebih Jelas: Kode SMS Verifikasi Akun Developer Tidak Kunjung Masuk (5 September 2026)
+
+**Konteks:** Melanjutkan Bagian 175 (WhatsApp Cloud API terblokir pending banding Facebook). Setelah investigasi lebih lanjut hari ini, ternyata masalahnya BUKAN "banding akun Facebook" seperti dugaan awal Bagian 175 -- akun Facebook itu sendiri TERBUKTI AMAN dan normal (dicek langsung, profil "Muhamad Teja" bisa diakses penuh, tidak ada banner penangguhan, "Tidak tersedia postingan" -- konsisten sebagai akun baru yang wajar).
+
+**Diagnosa yang benar:** Yang bermasalah adalah **akun App Developer** (`developers.facebook.com`, app "Benangrasa Notifikasi"), BUKAN akun Facebook pribadi. Halaman developer terus menampilkan "Perlu konfirmasi akun -- Kami melihat aktivitas yang tidak biasa di akun developer ini", dan proses konfirmasinya WAJIB kirim kode 6 digit ke nomor `+62857...` -- kode ini TIDAK KUNJUNG MASUK meski sudah diminta berkali-kali (SMS maupun opsi ganti nomor, yang ternyata tetap butuh verifikasi SMS ke nomor lama dulu sebelum bisa ganti).
+
+**Sempat salah jalur:** Asisten AI Meta Business (chatbot resmi) awalnya melaporkan "akun Facebook Anda ditangguhkan sejak 4 September 2026 karena Standar Komunitas" -- info ini TIDAK AKURAT/tidak sinkron dengan kondisi nyata akun Facebook yang ternyata aman. Kemungkinan chatbot itu membaca status yang sudah basi atau salah asosiasi. Jangan percaya penuh laporan status dari chatbot ini tanpa verifikasi manual ke akun aslinya.
+
+**Instruksi resmi yang didapat dari chatbot Meta (bagian yang akurat & berguna):** "Tunggu hingga 24 jam jika Anda telah melakukan terlalu banyak permintaan kode dalam waktu singkat." Kemungkinan besar sistem Meta sudah menerapkan rate-limit/cooldown ke nomor `+62857...` karena sudah diminta berulang kali dalam waktu singkat hari ini (4-5 September 2026).
+
+**Keputusan: DITUNDA sampai besok (6 September 2026 atau lebih), JANGAN dicoba lagi hari ini.** Mencoba lagi sekarang berisiko mereset ulang hitungan cooldown 24 jam, membuat proses makin lama. Saat dicoba lagi nanti, WAJIB: coba SEKALI saja, tunggu penuh beberapa menit tanpa refresh/klik ulang berkali-kali sebelum menyerah.
+
+**Progress yang TETAP AMAN tersimpan (tidak berubah dari Bagian 175):** Meta Business Portfolio "Benangrasa", App Developer "Benangrasa Notifikasi", use case WhatsApp, nomor telepon uji (`1354786407709524`), WhatsApp Business Account ID (`1431265412235167`), nomor penerima uji sudah terverifikasi. Token akses BELUM sempat digenerate -- tidak ada risiko kredensial.
+
+**Next steps aktif diperbarui (menggantikan catatan lama di Bagian 175 soal "cek status banding" -- sekarang jelas bukan itu masalahnya):**
+[ ] Besok (atau kapan saja setelah jeda 24 jam wajar): coba SEKALI lagi minta kode SMS verifikasi akun developer ke `+62857...`, di jam pagi/jaringan lebih stabil
+[ ] Kalau SMS tetap tidak masuk setelah 1x percobaan wajar besok: pertimbangkan opsi lain -- ganti ke nomor kontak dari provider berbeda (kalau ada nomor cadangan), atau hubungi Meta Business Help Center resmi lewat jalur berbeda (bukan chatbot AI yang terbukti kurang akurat)
+[ ] Setelah konfirmasi akun developer berhasil: lanjut generate token akses (titik terakhir sebelum insiden ini, di halaman Penyiapan API)
