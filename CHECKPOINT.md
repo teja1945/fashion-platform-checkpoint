@@ -754,3 +754,28 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
     -- cek ilustrasi Canva bebas dari teks gibberish, dan resize ke rasio vertikal
     9:16 SEJAK AWAL generate kalau tujuan akhirnya Reels
 [ ] Pantau performa Seri B #1 (views/engagement) sebagai baseline pembanding ke Seri A #1
+
+## 181. Fix Race Condition search_path (P1 #9) + Bug Tambahan Pool Size Melebihi Limit Supabase -- SELESAI & TERUJI (6 September 2026)
+
+**Rasa yang dipenuhi:**
+- **Rasa Ketelitian** -- fix diverifikasi berlapis, bukan cuma "kelihatannya benar": (1) tes terisolasi 10 koneksi paralel manggil fungsi pgcrypto yang butuh search_path benar, (2) restart pm2 asli + pantau log produksi 90 detik dengan interval worker diketahui persis (gap monitor 10 detik, stuck-job monitor 60 detik) baru dianggap bersih, (3) proses tes ini sendiri menemukan bug KEDUA yang tidak diduga (pool size melebihi limit Supabase) yang kalau tidak ketauan sekarang baru muncul nanti pas beban tinggi.
+- **Rasa Keamanan** -- race condition search_path berisiko bikin query tanpa schema-qualify salah resolve ke schema lain di koneksi yang baru dibuat (celah waktu antara connect dan SET search_path selesai); fix pool size mencegah error fatal EMAXCONNSESSION yang bisa jatuhin availability saat lonjakan trafik/restart.
+
+**Konteks masalah:** Diagnosis lanjutan dari known issue Bagian 174 (error transient `invalid input syntax for type uuid: ""` pasca-restart pm2, dicurigai kuirk search_path). Root cause: `pool.on("connect", client => client.query("SET search_path..."))` di `db.js` TIDAK di-`await` -- pool langsung anggap koneksi baru "siap pakai" begitu event `connect` selesai jalan, padahal query SET search_path-nya bisa masih pending. Perbaikan lewat `await` di 30+ titik pemanggilan `pool.connect()` (server.js, worker.js, versioning.js, ingestion.js, dll) dinilai terlalu berisiko untuk solo dev -- rawan kelewat 1 titik, bug balik lagi diam-diam.
+
+**Implementasi:**
+1. `db.js`: tambah `options: "-c search_path=public,extensions"` di config `Pool` -- search_path diset sebagai startup parameter Postgres saat physical connection dibuat (sebelum koneksi dianggap ready sama sekali), bukan lewat query terpisah setelahnya. Berlaku otomatis ke SEMUA pemanggilan `pool.connect()` tanpa perlu edit satupun titik lain.
+2. Handler lama `pool.on("connect", ...)` SENGAJA dibiarkan sebagai jaring pengaman, belum dihapus -- baru dipertimbangkan dihapus setelah fix baru terbukti stabil di produksi dalam jangka waktu lebih panjang.
+3. **Bug tambahan ditemukan saat testing:** `max: 20` di config Pool ternyata melebihi limit asli Supabase Session Pooler (`pool_size: 15`) -- kebukti langsung lewat error fatal `EMAXCONNSESSION` pas tes 30 koneksi paralel. Diperbaiki jadi `max: 10` (sisa ruang untuk script one-off seperti check.js/cleanup.js/reset-job.js yang jalan manual sambil server.js hidup).
+
+**Testing:**
+- Tes terisolasi: 10 `pool.connect()` paralel, masing-masing langsung manggil `crypt()` (butuh schema `extensions`) tanpa jeda -- 10/10 berhasil, 0 gagal.
+- Verifikasi produksi: `pm2 flush` + `pm2 restart` + pantau log 90 detik (mencakup ~9 tick gap monitor + 1 tick stuck-job monitor) -- bersih, tidak ada error.
+- File tes (`test-searchpath-race.js`) dihapus dari VPS setelah selesai, tidak disimpan sebagai residu.
+
+**Status: SELESAI & TERUJI.** P1 #9 (search_path race, dari 13 temuan audit ChatGPT ketiga Bagian 170) sekarang **DITUTUP**. Known issue transient uuid error dari Bagian 174 dianggap teratasi oleh fix ini, tapi TETAP DIPANTAU beberapa hari ke depan di log produksi sebelum diklaim 100% tuntas (belum pernah berhasil direproduksi ulang secara sengaja sebelumnya, jadi tidak ada baseline "before" yang pasti sama persis).
+
+**Next steps aktif ditambah:**
+[ ] Pantau log produksi beberapa hari ke depan -- pastikan error transient uuid tidak muncul lagi sama sekali
+[ ] Pertimbangkan hapus handler `pool.on("connect")` lama setelah fix baru terbukti stabil dalam jangka lebih panjang
+[ ] Lanjut ke P1 #8 (Redis session TTL, touchSession tidak perpanjang staff_sessions:*) sebagai next item dari urutan prioritas Bagian 178
