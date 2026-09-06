@@ -997,3 +997,52 @@ Pola posting: gantian A-B-A-B dst, ritme 2-3x/minggu (kira-kira tiap 2-3 hari se
 [ ] Besok (atau kapan saja setelah jeda 24 jam wajar): coba SEKALI lagi minta kode SMS verifikasi akun developer ke `+62857...`, di jam pagi/jaringan lebih stabil
 [ ] Kalau SMS tetap tidak masuk setelah 1x percobaan wajar besok: pertimbangkan opsi lain -- ganti ke nomor kontak dari provider berbeda (kalau ada nomor cadangan), atau hubungi Meta Business Help Center resmi lewat jalur berbeda (bukan chatbot AI yang terbukti kurang akurat)
 [ ] Setelah konfirmasi akun developer berhasil: lanjut generate token akses (titik terakhir sebelum insiden ini, di halaman Penyiapan API)
+
+## 180. Seri B #1 Dipost -- Video Progress Sistem Eskalasi Job Stuck (6 September 2026)
+
+**Konten:** Reels pertama Seri B ("Progress Bikin Produk"), angle sistem eskalasi otomatis
+untuk job produksi yang macet (lanjutan cerita Seri A #1). 5 slide, narasi TTS ~37 detik,
+caption dengan SEO/GEO keyword konveksi + kontak lengkap (portfolio/email/WA).
+
+**Proses produksi:** Outline dibuat via Canva presentation-outline (5 slide), digenerate,
+diedit teksnya per slide manual (find_and_replace_text) supaya sesuai naskah dan data
+kontak asli. Export video awal dari Canva CACAT -- cuma slide 1 yang punya visual,
+sisanya layar hitam total dari detik ~5 sampai akhir walau audio tetap jalan penuh 36 detik.
+Diperbaiki dengan cara: user download manual ke-5 slide sebagai JPG dari Canva
+(karena sandbox tidak punya akses network ke domain Canva), lalu dirakit ulang jadi
+video pakai ffmpeg (tiap slide jadi klip statis dengan durasi proporsional ke bagian
+narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
+
+**Status: DIPOST APA ADANYA, meski ada 2 catatan kualitas yang diketahui SEBELUM post:**
+1. Diagram ilustrasi di slide 3 (Solusi) mengandung teks gibberish/acakan dari
+   library ilustrasi Canva (contoh pola: label acak pada figure orang) -- tidak diganti,
+   keputusan sadar user untuk lanjut post karena masih tahap belajar.
+2. Video tetap format landscape 1920x1080, TIDAK dikonversi ke vertikal 9:16 sebelum
+   post -- Instagram kemungkinan crop/beri border.
+
+**Pelajaran untuk sesi berikutnya:**
+- SEBELUM generate design berisi ilustrasi figure/orang dari Canva AI, cek dulu apakah
+  ada teks/label di dalam ilustrasi itu -- rawan gibberish, ganti ke diagram tanpa
+  teks kalau ketemu.
+- Kalau tujuan akhir konten adalah Reels/Stories, request design_type atau resize
+  ke rasio vertikal (1080x1920) SEJAK AWAL generate, bukan setelah semua slide selesai
+  diedit -- resize belakangan berisiko merusak layout yang sudah pas.
+- Export video dari Canva untuk presentation multi-halaman TERBUKTI tidak reliable
+  (bug: hanya page pertama yang ter-render jadi video, sisanya blank). Kalau butuh
+  video, rencanakan dari awal untuk export tiap page sebagai PNG lalu rakit manual
+  via ffmpeg -- jangan andalkan native "export as MP4" dari Canva untuk presentation
+  bertahap begini.
+
+**Next steps aktif ditambah (rencana konten 3-4 hari ke depan, urutan A-B-A-B):**
+[ ] Seri A #2 (giliran berikutnya): angle "stok kain di catatan vs kondisi fisik gudang
+    beda" -- nyambung dari Seri B #1 (job stuck) ke masalah data-integrity berikutnya
+    yang relate ke pemilik konveksi. Hook kasar: "Stok kain di sistem bilang ada 50 meter.
+    Pas dicek ke gudang... beda."
+[ ] Seri B #2 (3-4 hari setelah A #2): angle progress pembenahan inventory semantics
+    (4 jenis movement: RESERVED/STOCK_CONSUMED/RELEASED/RESTOCKED tidak boleh
+    diperlakukan sama -- temuan Bagian 178 #2) -- nyambung sebagai "jawaban" dari
+    masalah yang diangkat di Seri A #2, sama seperti pola B #1 menjawab A #1
+[ ] Sebelum eksekusi konten di atas: terapkan pelajaran dari Seri B #1 (Bagian 180)
+    -- cek ilustrasi Canva bebas dari teks gibberish, dan resize ke rasio vertikal
+    9:16 SEJAK AWAL generate kalau tujuan akhirnya Reels
+[ ] Pantau performa Seri B #1 (views/engagement) sebagai baseline pembanding ke Seri A #1
