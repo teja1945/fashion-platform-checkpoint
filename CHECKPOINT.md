@@ -833,3 +833,42 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 **Next steps aktif ditambah:**
 [ ] Cek apakah ada dokumentasi/catatan lain yang masih rujuk domain lama (demo.benangrasa.com) sebagai next-step housekeeping kecil
 [ ] Pertimbangkan hapus permanen backup config lama di /etc/nginx/backups/ setelah beberapa minggu tanpa masalah
+
+## 184. Fix Total scanner.html -- 6 Bug Kontrak API + Pipeline Stage Dinamis Per-Tenant -- SELESAI & TERUJI (6 September 2026)
+
+**Rasa yang dipenuhi:**
+- **Rasa Ketelitian** -- testing berlapis (curl end-to-end, bukan cuma baca kode) menemukan bug KE-6 yang tidak diduga (`x-staff-token` hilang di completeFinish/completeReject) tepat di tengah proses verifikasi -- bukti nyata kenapa "sudah kelihatan benar di kode" tidak cukup, harus dites jalur penuh sampai response sukses.
+- **Rasa Grosir** -- pipeline stage sekarang per-tenant dinamis (tabel `tenant_pipeline_stages` + endpoint `/v1/pipeline-stages`), bukan hardcode 1 daftar stage yang cuma cocok untuk 1 tenant. Kolom `custom_icon_url` disiapkan kosong dari awal untuk kebutuhan branding custom tenant di masa depan tanpa perlu ubah struktur lagi nanti.
+- **Rasa Kepemimpinan** -- 1 sumber kebenaran untuk domain (retire skema lama, Bagian 183) dan untuk daftar stage (database, bukan tersebar di scanner.html + backend).
+
+**Konteks masalah:** Diawali dari item lama CHECKPOINT ("scanner.html masih pakai entity_id/entity_type, backend sudah pakai production_job_id/order_id", Bagian 170 poin 6) yang tadinya dikira kecil. Investigasi bertahap menemukan scanner.html SAMA SEKALI TIDAK BISA DIPAKAI kalau dites -- 6 bug kontrak API terpisah, ditemukan satu demi satu lewat pembacaan kode + testing curl asli (bukan diasumsikan benar dari kode saja):
+1. `callAcquire`/`callRelease`/`uploadPhoto` kirim `entity_id`, backend minta `production_job_id`
+2. `completeFinish`/`completeReject` kirim `entity_id`+`entity_type`, backend minta `order_id` (field beda dari `production_job_id`, perlu lookup)
+3. Stage key hardcoded scanner.html (`sewing`, `shipping`, dst) TIDAK COCOK sama data pipeline asli tenant demo (`jahit`, `shipped`) -- sempat salah disimpulkan "sudah tidak relevan" sebelum di-cross-check ke database beneran
+4. Tidak ada mekanisme lookup `production_job_id` <-> `order_id` (2 identitas beda, staff cuma scan 1 nomor QR)
+5. Hardcode 1 daftar stage untuk SEMUA tenant -- gagal desain untuk platform multi-tenant yang tiap tenant bisa custom pipeline-nya sendiri
+6. `completeFinish`/`completeReject` tidak kirim header `x-staff-token` ke `/v1/events`, padahal endpoint itu butuh sesi staff aktif -- ketahuan pas testing end-to-end, BUKAN dari baca kode
+
+**Implementasi:**
+1. Migration Supabase: 3 kolom baru di `tenant_pipeline_stages` (`label`, `requires_photo`, `custom_icon_url`), backfill data tenant demo.
+2. `server.js`: endpoint baru `GET /v1/pipeline-stages` (tenant-scoped).
+3. `scanner.html`: `STAGES`/`MANDATORY_PHOTO_STAGES` diubah dari hardcode jadi `let` kosong, diisi lewat `loadPipelineStages()` yang dipanggil di `enterScanMode()` (titik paling aman -- backend URL & API key sudah pasti valid, staff sudah login). Dropdown reject dipindah ke fungsi `renderRejectDropdown()`, dipanggil setelah stage terisi (sebelumnya jalan di level atas script sebelum data ada).
+4. `entity_id` -> `production_job_id` di 3 fungsi; `entity_id`+`entity_type` -> `order_id` (dengan `lookupOrderId()` baru, query ke `GET /v1/orders` yang sudah ada) di 2 fungsi; `x-staff-token` ditambahkan ke 2 fungsi yang kelewat.
+5. Field `img` (path asset foto per-stage) dihapus -- terbukti dead code, tidak pernah dirender di manapun.
+6. Sekalian retire domain nginx lama (`demo.benangrasa.com`, `api.benangrasa.com`) ke `*.rakyat.benangrasa.com` -- dicatat terpisah di Bagian 183.
+
+**Testing end-to-end (curl asli ke `demo.rakyat.benangrasa.com`, tenant demo, job `25352257-4cff-4377-85d7-2a63b05146fe`):**
+1. Login staff (PIN reset khusus untuk testing, data tenant demo bukan produksi) -> 200
+2. Lock acquire (`production_job_id`) -> 200
+3. Upload foto JPEG minimal valid, stage `jahit` -> 200
+4. Lookup `order_id` dari `production_job_id` via `/v1/orders` -> ketemu
+5. STAGE_COMPLETED via `order_id` + `x-staff-token` -> 201 (baru sukses setelah fix bug #6 di atas -- percobaan pertama tanpa header ini gagal 401, itulah cara bug #6 ketahuan)
+6. Lock release -> 200
+7. Data tes dibersihkan: `current_stage` job dikembalikan ke `jahit` (sempat maju ke `qc` akibat STAGE_COMPLETED asli), biar tetap reusable untuk testing sesi berikutnya.
+
+**Status: SELESAI & TERUJI.** Commit kode: `4498845` (fix awal field + endpoint pipeline-stages) dan `c9c180f` (dynamic stage loading + fix header x-staff-token). Item lama Bagian 170 poin 6 dan Bagian 170 poin 7 (stage key mismatch) sekarang **DITUTUP**.
+
+**Next steps aktif ditambah:**
+[ ] scanner.html belum pernah dites lewat browser/kamera asli (baru dites via curl simulasi) -- perlu sesi tes fisik pakai HP begitu ada tenant/order asli
+[ ] Bug kecil ditemukan di tengah jalan: script `scripts/set-tenant-api-keys.js` menambah baris baru ke .env saat rotate, bukan replace baris lama -- menyebabkan baris duplikat menumpuk tiap rotate (fungsinya masih benar sekarang, dotenv pakai baris terakhir, tapi berantakan jangka panjang)
+[ ] Custom icon per-tenant (`custom_icon_url`) baru kolom kosong, belum ada UI admin buat isi -- next feature kalau ada tenant minta
