@@ -773,7 +773,7 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 - Verifikasi produksi: `pm2 flush` + `pm2 restart` + pantau log 90 detik (mencakup ~9 tick gap monitor + 1 tick stuck-job monitor) -- bersih, tidak ada error.
 - File tes (`test-searchpath-race.js`) dihapus dari VPS setelah selesai, tidak disimpan sebagai residu.
 
-**Status: SELESAI & TERUJI.** P1 #9 (search_path race, dari 13 temuan audit ChatGPT ketiga Bagian 170) sekarang **DITUTUP**. Known issue transient uuid error dari Bagian 174 dianggap teratasi oleh fix ini, tapi TETAP DIPANTAU beberapa hari ke depan di log produksi sebelum diklaim 100% tuntas (belum pernah berhasil direproduksi ulang secara sengaja sebelumnya, jadi tidak ada baseline "before" yang pasti sama persis).
+**Status: SELESAI & TERUJI.** Ter-commit di repo private commit `f69777a`, tersinkron ke repo public commit `edf471a`. P1 #9 (search_path race, dari 13 temuan audit ChatGPT ketiga Bagian 170) sekarang **DITUTUP**. Known issue transient uuid error dari Bagian 174 dianggap teratasi oleh fix ini, tapi TETAP DIPANTAU beberapa hari ke depan di log produksi sebelum diklaim 100% tuntas (belum pernah berhasil direproduksi ulang secara sengaja sebelumnya, jadi tidak ada baseline "before" yang pasti sama persis).
 
 **Next steps aktif ditambah:**
 [ ] Pantau log produksi beberapa hari ke depan -- pastikan error transient uuid tidak muncul lagi sama sekali
