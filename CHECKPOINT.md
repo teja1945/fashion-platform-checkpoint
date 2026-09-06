@@ -809,3 +809,27 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 **Pelajaran:** Checklist "sebelum mulai sesi" (baris 309-330) berisi BEBERAPA langkah wajib, bukan cuma 1 -- kecenderungan Claude cuma menjalankan sebagian (misal: baca CHECKPOINT.md) dan menganggap itu cukup, padahal ada langkah lain di checklist yang sama (git pull, git log -10) yang juga wajib tapi kurang menonjol karena bukan bagian "baca isi", melainkan "verifikasi state repo". Kedua jenis langkah ini perlu diperlakukan setara wajibnya.
 
 **Status: DICATAT.** Tidak memerlukan perbaikan kode (dampak nihil), tapi memperkuat catatan bahwa checklist multi-langkah harus dijalankan LENGKAP, bukan sebagian, konsisten dengan aturan baris 497 (grep ulang ATURAN WAJIB) yang baru dibuat sesi ini.
+
+## 183. Retire Domain Lama demo.benangrasa.com/api.benangrasa.com, Standarin ke *.rakyat.benangrasa.com -- SELESAI & TERUJI (6 September 2026)
+
+**Rasa yang dipenuhi:**
+- **Rasa Ketelitian** -- sebelum hapus config lama, dicek dulu ke kode (`CORS ALLOWED_ORIGIN_PATTERNS`) bahwa `*.rakyat.benangrasa.com` sudah jadi satu-satunya pola resmi di codebase -- bukan asumsi sepihak. Verifikasi end-to-end pakai curl asli (bukan cuma nginx -t) sebelum dianggap selesai: domain baru sukses penuh sampai ke database, domain lama gagal connect total.
+- **Rasa Kepemimpinan** -- satu sumber kebenaran untuk domain, tidak dibiarkan 2 skema hidup bersamaan yang bisa bikin bingung sesi/developer berikutnya.
+
+**Konteks:** User sadar ada 2 skema domain nginx aktif bersamaan -- lama (`demo.benangrasa.com`, `api.benangrasa.com`, file terpisah) dan baru (`rakyat.benangrasa.com` + wildcard `*.rakyat.benangrasa.com`, dari Bagian 176). Ditemukan saat sesi lagi cari cara akses scanner.html untuk testing. Cek ke `server.js` CORS whitelist mengonfirmasi kode sendiri sudah anggap `*.rakyat.benangrasa.com` sebagai "rumah baru", domain lama tidak pernah dibersihkan dari nginx meski sudah tidak dipakai di kode.
+
+**Implementasi:**
+1. Backup + nonaktifkan config lama: `demo.benangrasa.com` dan `api.benangrasa.com` dipindah dari `/etc/nginx/sites-enabled/` ke `/etc/nginx/backups/` (sesuai pelajaran Bagian 176 -- backup config sistem TIDAK BOLEH ditinggal di folder auto-load).
+2. `nginx -t` sebelum reload -- valid.
+3. `sudo systemctl reload nginx` (bukan restart, zero-downtime).
+
+**Testing:**
+- `https://demo.rakyat.benangrasa.com/v1/pipeline-stages` tanpa API key -> `401` (bukti DNS+SSL+nginx+tenantResolver semua kebaca benar, cuma nolak di step API key seperti seharusnya).
+- Request sama pakai API key asli -> `200` dengan data lengkap dari database (bukti alur penuh jalan, bukan cuma sampai nginx).
+- `https://demo.benangrasa.com/v1/pipeline-stages` -> gagal connect total (`HTTP 000`), konfirmasi domain lama sudah benar-benar mati, tidak ada regresi diam-diam.
+
+**Status: SELESAI & TERUJI.** Diverifikasi via curl langsung ke domain publik (bukan cuma localhost/nginx -t), hasil di atas. Config lama disimpan di `/etc/nginx/backups/` (bukan dihapus permanen) kalau-kalau perlu di-rollback.
+
+**Next steps aktif ditambah:**
+[ ] Cek apakah ada dokumentasi/catatan lain yang masih rujuk domain lama (demo.benangrasa.com) sebagai next-step housekeeping kecil
+[ ] Pertimbangkan hapus permanen backup config lama di /etc/nginx/backups/ setelah beberapa minggu tanpa masalah
