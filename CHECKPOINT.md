@@ -1,4 +1,6 @@
->>> WAJIB DIBACA DULU SEBELUM APAPUN LAIN: lihat Bagian 64 "FILOSOFI PRODUK — 9 RASA" di bawah (termasuk Rasa Grosir, Kepemimpinan, Ketelitian — ditambahkan Bagian 88 & 14 Agustus 2026). Semua fitur baru (endpoint, UI, notifikasi, teks, dashboard) WAJIB dicek balik ke 9 Rasa sebelum dianggap selesai. Ini prinsip permanen, bukan sekadar 1 dari banyak ide di checkpoint ini. <<<
+>>> WAJIB DIBACA DULU SEBELUM APAPUN LAIN: lihat Bagian 64 "FILOSOFI PRODUK — 9 RASA" di bawah (termasuk Rasa Grosir, Kepemimpinan, Ketelitian — ditambahkan Bagian 88 & 14 Agustus 2026). Semua fitur baru (endpoint, UI, notifikasi, teks, dashboard) WAJIB dicek balik ke 9 Rasa sebelum dianggap selesai. Ini prinsip permanen, bukan sekadar 1 dari banyak ide di checkpoint ini.
+
+>>> WAJIB JUGA: file ini punya BANYAK "ATURAN WAJIB" lain tersebar di tengah dokumen, bukan cuma yang di atas. Di AWAL sesi, jalankan `grep -n "ATURAN WAJIB\|WAJIB DIBACA\|PRINSIP PERMANEN" CHECKPOINT.md` untuk lihat daftar lengkapnya -- jangan cuma andalkan ingatan dari 1x baca linear. Jalankan ulang grep yang sama SEBELUM menulis status "SELESAI"/"TERUJI" apapun atau bilang ke user "tidak ada yang kurang" (lihat aturan 6 Sept 2026 di bawah, lahir dari insiden Bagian 181). <<<
 
 CHECKPOINT — Fashion Platform (Multi-Tenant SaaS)
 Update terakhir: 2 September 2026 (split keempat — arsip Bagian 136-161 ke CHECKPOINT_ARCHIVE_5.md)
@@ -489,6 +491,21 @@ User (Teja) memutuskan proyek ini gak harus buru-buru kejual/laku — walaupun s
 **ATURAN WAJIB (cakupan luas, semua jenis pekerjaan):** Di AWAL mengerjakan apapun -- fix bug, bikin fitur baru, investigasi masalah, tugas administratif/infra, sampai hal kecil -- WAJIB dulu `grep`/telusuri CHECKPOINT.md (dan CHECKPOINT_ARCHIVE_*.md kalau perlu) cari apakah sudah ada SOP/keputusan/pola kerja yang relevan untuk hal itu. Kalau ketemu, PAKAI itu, jangan bikin jalur baru sendiri walau kelihatan "lebih hati-hati" atau "lebih modern". Kalau SOP yang ada ternyata kurang lengkap/perlu diperbaiki, itu didiskusikan dulu ke user sebagai perubahan SOP, bukan diam-diam diganti jalur lain. Ini berlaku SEBELUM baca kode, SEBELUM nulis fix, SEBELUM kasih command apapun ke user.
 
 Ini konsisten dengan prinsip lama "CHECKPOINT bukan source of truth tapi WAJIB dicek dulu" (Bagian 170) -- prinsip itu ternyata sempat dilanggar sendiri oleh Claude di insiden sync ini, dan sekarang diperjelas cakupannya supaya tidak terulang di jenis pekerjaan lain.
+
+---
+
+## ATURAN WAJIB BARU (6 September 2026) -- WAJIB grep ulang semua "ATURAN WAJIB" SEBELUM klaim status SELESAI, bukan cuma andalkan ingatan baca di awal sesi
+
+**Insiden:** Bagian 181 (fix search_path race + pool size) diklaim "SELESAI & TERUJI" dan disampaikan ke user sebagai "tidak ada yang kurang", PADAHAL kode belum di-commit/push sama sekali ke GitHub, dan kalimat status ditulis TANPA bukti commit hash verbatim -- padahal aturan soal itu PERSIS SUDAH ADA di baris ~169, lahir dari insiden serupa (Bagian 169/170). CHECKPOINT.md sudah dibaca lengkap 756 baris di awal room ini, tapi aturan itu "terkubur" di tengah dokumen panjang campuran narasi historis + aturan wajib -- diandalkan dari ingatan 1x baca di awal, bukan dicek ulang secara mekanis pas mau nulis status. User yang nyadar duluan, bukan Claude.
+
+**Kelemahan yang harus diperbaiki:** Baca CHECKPOINT.md sekali di awal sesi TIDAK CUKUP buat nangkep semua aturan wajib yang tersebar di tengah dokumen panjang (700+ baris dan terus bertambah) -- ingatan dari 1x baca gampang kalah sama detail teknis yang lagi dikerjain berjam-jam kemudian.
+
+**ATURAN WAJIB:**
+1. Di AWAL setiap sesi/room baru, SEBELUM mulai kerja apapun: jalankan `grep -n "ATURAN WAJIB\|WAJIB DIBACA\|PRINSIP PERMANEN" CHECKPOINT.md` untuk dapetin daftar LENGKAP semua aturan wajib yang berlaku -- jangan cuma andalkan hasil baca linear sekali di awal.
+2. SEBELUM menulis status "SELESAI"/"TERUJI"/"TER-COMMIT" apapun di CHECKPOINT.md, ATAU bilang ke user "tidak ada yang kurang"/"semua sudah beres" -- WAJIB jalanin ulang grep yang sama sebagai pengecekan mekanis, bukan ngandelin ingatan. Ini khususnya berlaku buat aturan baris 169 (bukti commit hash verbatim).
+3. Kalau checkpoint makin panjang ke depan, pertimbangkan bikin 1 seksi terpisah "DAFTAR SEMUA ATURAN WAJIB" di paling atas file (bukan cuma banner nunjuk ke 1 aturan) supaya makin gampang di-scan tanpa grep manual.
+
+Ini melengkapi aturan baris 483 (cek SOP checkpoint SEBELUM MULAI kerja) -- yang itu soal AWAL kerja, ini soal SEBELUM KLAIM SELESAI, titik yang ternyata masih bisa kelewat walau SOP di awal sudah dicek dan dibaca lengkap.
 
 ---
 
