@@ -796,3 +796,16 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 [ ] Pantau log produksi beberapa hari ke depan -- pastikan error transient uuid tidak muncul lagi sama sekali
 [ ] Pertimbangkan hapus handler `pool.on("connect")` lama setelah fix baru terbukti stabil dalam jangka lebih panjang
 [ ] Lanjut ke P1 #8 (Redis session TTL, touchSession tidak perpanjang staff_sessions:*) sebagai next item dari urutan prioritas Bagian 178
+
+## 182. Insiden Kecil Tercatat -- SOP "git log --oneline -10 di Awal Sesi" Tidak Dijalankan (6 September 2026)
+
+**Rasa yang dipenuhi:**
+- **Rasa Ketelitian** -- kesalahan prosedural sekecil apapun tetap dicatat resmi, bukan dianggap "terlalu kecil untuk didokumentasikan". User eksplisit menolak standar ganda "kecil vs besar" untuk kepatuhan SOP.
+
+**Konteks:** Di tengah proses memperbaiki insiden Bagian 181 (klaim SELESAI tanpa commit hash), Claude menjalankan grep menyeluruh ke semua "ATURAN WAJIB" dan menemukan SATU aturan lagi yang tidak dijalankan sesuai urutan tertulis: baris 316-317 mewajibkan `git log --oneline -10` di AWAL sesi (sebelum mulai edit file apapun), untuk deteksi dini kemungkinan tabrakan dari room/sesi lain. Ini tidak dijalankan eksplisit di awal room ini.
+
+**Dampak:** NIHIL yang terverifikasi -- `git log --oneline -10` dijalankan belakangan (setelah insiden ini disorot user) dan histori commit terbukti runtut tanpa tabrakan (`fc32bbc` -> `e4d9ab6` -> `f69777a` -> `7c92d52`, dst -- sesuai commit yang memang dibuat sepanjang sesi ini, tidak ada commit asing dari room lain yang menyusup).
+
+**Pelajaran:** Checklist "sebelum mulai sesi" (baris 309-330) berisi BEBERAPA langkah wajib, bukan cuma 1 -- kecenderungan Claude cuma menjalankan sebagian (misal: baca CHECKPOINT.md) dan menganggap itu cukup, padahal ada langkah lain di checklist yang sama (git pull, git log -10) yang juga wajib tapi kurang menonjol karena bukan bagian "baca isi", melainkan "verifikasi state repo". Kedua jenis langkah ini perlu diperlakukan setara wajibnya.
+
+**Status: DICATAT.** Tidak memerlukan perbaikan kode (dampak nihil), tapi memperkuat catatan bahwa checklist multi-langkah harus dijalankan LENGKAP, bukan sebagian, konsisten dengan aturan baris 497 (grep ulang ATURAN WAJIB) yang baru dibuat sesi ini.
