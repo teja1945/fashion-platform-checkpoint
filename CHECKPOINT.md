@@ -872,3 +872,20 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 [ ] scanner.html belum pernah dites lewat browser/kamera asli (baru dites via curl simulasi) -- perlu sesi tes fisik pakai HP begitu ada tenant/order asli
 [ ] Bug kecil ditemukan di tengah jalan: script `scripts/set-tenant-api-keys.js` menambah baris baru ke .env saat rotate, bukan replace baris lama -- menyebabkan baris duplikat menumpuk tiap rotate (fungsinya masih benar sekarang, dotenv pakai baris terakhir, tapi berantakan jangka panjang)
 [ ] Custom icon per-tenant (`custom_icon_url`) baru kolom kosong, belum ada UI admin buat isi -- next feature kalau ada tenant minta
+
+## 185. Klarifikasi Utang Desain: Bundle-Split (BUNDLE_ALLOCATION) Belum Diadaptasi ke Schema v2 -- DICATAT, BELUM DIPUTUSKAN (6 September 2026)
+
+**Konteks:** User teringat pernah baca audit ChatGPT soal "job di scanner.html beda sama yang dibuat sekarang" -- ditelusuri balik ke komentar lama di `worker.js` baris 352-359 dan next-step lama baris 127, yang tadinya cuma 1 baris nyempil di tengah daftar panjang, gampang kelewat.
+
+**Apa itu bundle-split (istilah dari sistem lama, LTOS):** 1 pesanan pelanggan bisa dipecah jadi beberapa "batch" kerja terpisah yang dilacak progress-nya masing-masing sendiri (contoh: pesanan 100 kemeja dibagi ke 3 kelompok tukang jahit paralel, 30/30/40 pcs). LTOS punya `reconcileBundleSplits()` + event `BUNDLE_ALLOCATION` untuk ini.
+
+**Kondisi di fashion-platform (schema v2) SEKARANG:** Konsep ini BELUM ADA SAMA SEKALI. Model saat ini: 1 pesanan = 1 `production_job`, tidak bisa dipecah jadi beberapa batch paralel. Ini BUKAN bug -- sengaja ditunda, keputusan desain yang belum diambil: child bundle nanti disimpan sebagai baris `production_jobs` baru (dengan parent_job_id?), atau tabel terpisah sama sekali? Belum ada jawaban.
+
+**Kaitan ke kerjaan Bagian 184 (fix scanner.html hari ini):** Semua fix hari ini (QR = 1 `production_job_id`, dst) valid dan konsisten untuk model SEKARANG (1 pesanan = 1 job). TAPI kalau bundle-split ini nanti diimplementasi, `scanner.html` kemungkinan besar perlu dirombak lagi -- 1 QR code perlu mewakili 1 BATCH (child bundle), bukan 1 pesanan utuh. Ini bukan berarti fix hari ini salah, tapi mengingatkan bahwa fix ini bisa jadi bukan yang terakhir kalinya scanner.html disentuh.
+
+**Status: DICATAT, BELUM DIPUTUSKAN.** Tidak ada kerja kode di entri ini -- murni klarifikasi & elevasi next-step lama biar tidak terkubur lagi. Keputusan desain (baris production_jobs baru vs tabel terpisah) perlu didiskusikan lebih dulu sebelum ada implementasi apapun.
+
+**Next steps aktif ditambah (elevasi dari baris 127 lama, dipisah biar tidak nyempil lagi):**
+[ ] Putuskan desain bundle-split: child bundle jadi baris production_jobs baru (perlu kolom parent_job_id?) ATAU tabel terpisah sama sekali -- diskusi desain dulu, belum ada kerja kode
+[ ] Setelah keputusan desain di atas diambil: worker.js reconcileBundleSplits() perlu ditulis ulang untuk schema v2 (saat ini sengaja belum ditulis, lihat komentar worker.js baris 352-359)
+[ ] Kalau bundle-split jadi diimplementasi: scanner.html perlu dirombak lagi (QR mewakili 1 child bundle, bukan 1 production_job utuh) -- estimasi dampak ke fix Bagian 184
