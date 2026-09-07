@@ -891,3 +891,28 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 [ ] Putuskan desain bundle-split: child bundle jadi baris production_jobs baru (perlu kolom parent_job_id?) ATAU tabel terpisah sama sekali -- diskusi desain dulu, belum ada kerja kode
 [ ] Setelah keputusan desain di atas diambil: worker.js reconcileBundleSplits() perlu ditulis ulang untuk schema v2 (saat ini sengaja belum ditulis, lihat komentar worker.js baris 352-359)
 [ ] Kalau bundle-split jadi diimplementasi: scanner.html perlu dirombak lagi (QR mewakili 1 child bundle, bukan 1 production_job utuh) -- estimasi dampak ke fix Bagian 184
+
+## 186. Fix P0 Stage Invariant -- Cegah Submission Basi Dobel-Majuin Stage -- SELESAI & TERUJI (7 September 2026)
+
+**Rasa yang dipenuhi:**
+- **Rasa Ketelitian** -- fix diverifikasi 3 lapis: respons API (bedanya keliatan jelas, submission normal ada `stage_event`, submission basi tidak ada), query database langsung (`current_stage` tetap `qc`, tidak dobel maju ke `finishing`), dan konfirmasi notifikasi ke owner beneran tersimpan dengan pesan yang benar. Data tes dibersihkan total setelahnya (submission, foto, notifikasi tes dihapus; status job direset ke kondisi semula).
+- **Rasa Grosir/Keamanan** -- mencegah korupsi data progres produksi diam-diam (job dobel maju dari 1x kerjaan fisik) yang baru ketahuan lama kemudian kalau tidak dicegah dari titik konfirmasi.
+
+**Konteks masalah (temuan #1 audit ChatGPT keempat, Bagian 178):** Endpoint `POST /v1/stage-submissions/:id/confirm` mengecek `stage_key` submission itu VALID di pipeline tenant, TAPI tidak pernah mengecek apakah `stage_key` itu MASIH SAMA dengan `production_jobs.current_stage` SAAT INI. Skenario nyata: 2 submission dibuat untuk job+stage yang sama (mis. double-submit karena koneksi lambat). Submission pertama dikonfirmasi -> job maju. Submission kedua (untuk stage yang SAMA, sekarang sudah basi) tetap bisa dikonfirmasi dan ikut memajukan job lagi -- job dobel maju dari 1x kerjaan fisik.
+
+**Implementasi:**
+1. Tambah pengecekan invariant tepat setelah `production_jobs` di-lock (`FOR UPDATE`): `current_stage !== sub.stage_key` -> submission dianggap basi, TIDAK memajukan stage, tapi kerjaan staff (submission + discrepancy_case kalau ada) tetap tersimpan (filosofi sama dengan STUCK dari Bagian 174 -- staff yang sudah kerja benar tidak dihukum submit ulang).
+2. Refactor: logic "tandai STUCK + notifikasi T+0 ke owner" yang tadinya cuma dipakai 1 tempat (kegagalan `resolveStageTransition`), diekstrak jadi fungsi bersama `markJobStuckAndNotifyOwners()`, dipakai di 2 tempat sekarang (kegagalan transition DAN invariant basi) -- hindari duplikasi logic yang sama persis.
+
+**Testing end-to-end (curl ke `demo.rakyat.benangrasa.com`, job `25352257-4cff-4377-85d7-2a63b05146fe`):**
+1. Submission A (jahit, qty 50) dan B (jahit, qty 30) dibuat untuk job+stage sama.
+2. Confirm A oleh staff QC -> sukses normal, job maju `jahit -> qc`, respons mengandung `stage_event`.
+3. Confirm B (job sekarang sudah di `qc`, submission B masih `jahit`) -> terverifikasi TERTANGKAP invariant baru: respons TANPA `stage_event`, ada warning "progres order ini sudah tidak sinkron".
+4. Verifikasi database: `current_stage` tetap `qc` (TIDAK dobel maju), `stage_advance_status = 'STUCK'`, `stage_advance_error` berisi pesan diagnostik lengkap (stage_key submission vs current_stage job).
+5. Verifikasi notifikasi: tersimpan ke owner dengan judul & isi pesan yang benar.
+6. Data tes dibersihkan: submission A & B dihapus, foto tes dihapus, notifikasi tes dihapus, job direset ke `current_stage='jahit', stage_advance_status='OK'` (nilai default kolom, dikonfirmasi dulu ke `information_schema` sebelum reset -- bukan asal set NULL).
+
+**Status: SELESAI & TERUJI.** Commit `92fa9ae`. Temuan #1 audit ChatGPT keempat (Bagian 178) sekarang **DITUTUP**.
+
+**Next steps aktif ditambah:**
+[ ] Lanjut ke temuan #2 audit Bagian 178 (inventory semantics -- 4 jenis movement fabric_inventory) atau temuan #3 (Redis session TTL) sebagai prioritas berikutnya
