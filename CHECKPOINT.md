@@ -885,6 +885,8 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 
 **Status: DICATAT, BELUM DIPUTUSKAN.** Tidak ada kerja kode di entri ini -- murni klarifikasi & elevasi next-step lama biar tidak terkubur lagi. Keputusan desain (baris production_jobs baru vs tabel terpisah) perlu didiskusikan lebih dulu sebelum ada implementasi apapun.
 
+**Keputusan sequencing (6 September 2026):** User pilih strategi PROAKTIF, bukan nunggu tenant minta duluan -- alasannya: begitu tenant pertama butuh fitur pecah-pesanan-jadi-batch, sistem harus SUDAH SIAP, bukan baru mulai develop dadakan saat itu (yang bisa bikin tenant nunggu lama). Urutan kerja: selesaikan dulu SEMUA next-step aktif yang sudah ada di antrian (keamanan, Redis TTL, ToS/Privacy Policy, dst -- ini tetap prioritas lebih tinggi karena wajib ada sebelum tenant pertama masuk), BARU setelah itu semua beres, bundle-split dikerjakan proaktif tanpa perlu nunggu ada tenant yang eksplisit minta.
+
 **Next steps aktif ditambah (elevasi dari baris 127 lama, dipisah biar tidak nyempil lagi):**
 [ ] Putuskan desain bundle-split: child bundle jadi baris production_jobs baru (perlu kolom parent_job_id?) ATAU tabel terpisah sama sekali -- diskusi desain dulu, belum ada kerja kode
 [ ] Setelah keputusan desain di atas diambil: worker.js reconcileBundleSplits() perlu ditulis ulang untuk schema v2 (saat ini sengaja belum ditulis, lihat komentar worker.js baris 352-359)
