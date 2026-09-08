@@ -916,3 +916,22 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 
 **Next steps aktif ditambah:**
 [ ] Lanjut ke temuan #2 audit Bagian 178 (inventory semantics -- 4 jenis movement fabric_inventory) atau temuan #3 (Redis session TTL) sebagai prioritas berikutnya
+
+## 187. Verifikasi Akun Developer Meta Berhasil + Token Akses WhatsApp Cloud API Digenerate (8 September 2026)
+
+**Konteks:** Melanjutkan Bagian 175/179 -- verifikasi kode SMS ke akun App Developer sempat mandek berhari-hari (4-8 September, berkali-kali gagal walau sudah tunggu cooldown 24 jam). Akhirnya berhasil lewat jalur alternatif: opsi "Kirim kode melalui WhatsApp" di halaman checkpoint verifikasi (bukan SMS). Untuk itu, nomor `+6285715161671` (yang memang rencananya didaftarkan ke WhatsApp Cloud API) didaftarkan dulu ke WhatsApp Business biasa (app konsumer) supaya bisa menerima kode via jalur WhatsApp.
+
+**Catatan penting untuk next steps:** karena nomor ini sekarang aktif di WhatsApp Business biasa (app konsumer), nanti pas proses "Langkah 5: Tambahkan nomor telepon" di Penyiapan API (mendaftarkan nomor asli ke WhatsApp Cloud API, bukan nomor tes bawaan Meta), kemungkinan besar perlu proses migrasi/pelepasan nomor dari WhatsApp Business biasa dulu -- ini didukung resmi oleh Meta, bukan blocker, tapi jangan lupa langkah ini nanti.
+
+**Progress setelah verifikasi berhasil:**
+1. Dashboard app "Benangrasa Notifikasi" (ID Aplikasi `1379548000954771`) sudah bisa diakses normal, banner "Perlu konfirmasi akun" sudah hilang.
+2. Token akses WhatsApp Cloud API berhasil digenerate di halaman Penyiapan API, dengan cakupan **"Hanya setujui Akun WhatsApp saat ini"** (bukan "semua akun saat ini dan masa mendatang") -- sengaja dipilih scope paling sempit sesuai prinsip least-privilege proyek ini.
+3. Token disimpan ke `.env` VPS sebagai `WHATSAPP_ACCESS_TOKEN` (panjang 236 karakter, terverifikasi cuma 1 baris tidak ada duplikat) -- TIDAK PERNAH dikirim/ditampilkan di chat sesuai aturan kredensial proyek.
+
+**Status: MAJU SIGNIFIKAN, BELUM SELESAI TOTAL.** Token akses berhasil didapat, tapi integrasi WhatsApp Cloud API ke sistem notifikasi (fitur aslinya, dari Bagian 175: notifikasi stuck-job lewat WhatsApp) BELUM diimplementasikan -- baru sampai tahap dapat kredensial.
+
+**Next steps aktif ditambah:**
+[ ] Tes kirim pesan via API pakai token baru (curl ke endpoint /messages, contoh sudah ada di halaman Penyiapan API) -- pastikan token beneran valid sebelum lanjut integrasi
+[ ] Langkah 5 di Penyiapan API: tambahkan nomor telepon asli (bukan nomor tes Meta) -- perlu proses migrasi dari WhatsApp Business biasa dulu (lihat catatan di atas)
+[ ] Setelah nomor asli aktif: baru lanjut integrasi ke sistem notifikasi stuck-job (tujuan awal, Bagian 175)
+[ ] Token akses dari alur ini SEMENTARA (temporer) -- perlu dicek apakah butuh upgrade ke token permanen/System User token untuk production, jangan sampai expired diam-diam tanpa disadari
