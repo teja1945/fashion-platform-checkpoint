@@ -935,3 +935,61 @@ narasi masing-masing), digabung, dan audio asli dipasang ulang tanpa diubah.
 [ ] Langkah 5 di Penyiapan API: tambahkan nomor telepon asli (bukan nomor tes Meta) -- perlu proses migrasi dari WhatsApp Business biasa dulu (lihat catatan di atas)
 [ ] Setelah nomor asli aktif: baru lanjut integrasi ke sistem notifikasi stuck-job (tujuan awal, Bagian 175)
 [ ] Token akses dari alur ini SEMENTARA (temporer) -- perlu dicek apakah butuh upgrade ke token permanen/System User token untuk production, jangan sampai expired diam-diam tanpa disadari
+
+## 188. Konten Ekstra -- Video "Thobe Bordir Dari Nol Sampai Jadi" Dipost (9-10 September 2026)
+
+**Konten:** Video proses jahit/bordir thobe dari awal (gosok/setrika, bordir zigzag, jahit, obras, ukur
+badan) sampai produk jadi. DIPOSISIKAN SEBAGAI KONTEN EKSTRA DI LUAR ROTASI Seri A/B -- fungsinya
+sebagai reveal kredibilitas ("developer yang ternyata penjahit beneran"), bukan lanjutan topik Seri A
+(masalah konveksi) atau Seri B (progress software). Tracker Seri A/B TIDAK berubah -- Seri A #2
+(stok kain) tetap next di antrian.
+
+**Proses produksi & pelajaran teknis (dicatat detail biar gak keulang):**
+- Footage mentah (5 video + 6 foto) dikategorikan satu-satu sesuai instruksi user SEBELUM mulai edit
+  (user eksplisit minta "jangan bikin dulu sebelum disuruh") -- pola kerja: kumpul dulu, list kategori,
+  baru eksekusi setelah lengkap dan dapat go-ahead.
+- BUG BERULANG -ss/-t placement: `-ss`/`-t` yang ditaruh SESUDAH `-i` diperlakukan ffmpeg sebagai OUTPUT
+  option (dihitung dari timeline hasil filter/speed-change), BUKAN input option (timeline sumber asli).
+  Ini bikin trim/speed-up jadi salah dua kali dalam sesi ini (sekali di video, sekali lagi di audio
+  atempo) sebelum disadari. ATURAN: kalau mau trim SUMBER sebelum filter apapun (termasuk speed change),
+  `-ss`/`-t` HARUS ditaruh SEBELUM `-i`.
+- Upscale landscape 1920x1080 ke vertikal 1080x1920 (rasio 9:16) BERAT -- perlu upscale ~1.78x karena
+  sumber cuma punya 1080px tinggi asli. Hasil pertama kelihatan blur/warna aneh (saturasi dinaikkan
+  kebanyakan). Fix: pakai `scale=...:flags=lanczos` (bukan default bilinear) + turunkan saturasi
+  (cukup ~1.02, jangan >1.1) + `unsharp` yang di-tune halus. Tetap ada batas fisik -- gak akan setajam
+  sumber asli, cuma bisa dioptimalkan semaksimal mungkin.
+- Crop vertikal dari sumber landscape defaultnya CENTER -- kalau objek penting (misal: setrika) posisinya
+  di pinggir frame asli (bukan di tengah), crop default bakal MOTONG objek itu. Perlu geser `crop=W:H:X:Y`
+  manual per-klip kalau posisi objek gak di tengah, gak bisa pakai 1 preset crop buat semua klip.
+- **Sandbox TIDAK punya akses TTS engine offline maupun internet** (network egress allowlist-only,
+  `pip install`/domain Canva/domain apapun di luar whitelist ditolak) -- Claude gak bisa generate suara
+  AI ataupun ambil musik dari sini sama sekali. Voice-over dan musik WAJIB ditambahkan manual oleh user
+  di Canva/CapCut/tools lain.
+- Tools Canva (MCP) yang tersedia CUMA bisa baca/edit elemen halaman (teks, background media) via
+  `read-design`/`edit-design` -- audio timeline (voice-over, musik) yang ditambahkan user manual di
+  Canva video editor TIDAK ke-expose sama sekali lewat API ini. Field `elements` pada design video
+  balik kosong walau ada banyak track audio di editor asli. Jadi PERBAIKAN AUDIO TIMING/TRACK Canva
+  TIDAK BISA dilakukan lewat tools ini, WAJIB manual oleh user di Canva langsung.
+- User export video dari Canva dengan voice-over TTS yang durasi bicaranya (~27 detik) jauh lebih
+  pendek dari durasi video (45 detik) -- menyebabkan ~18 detik di akhir video (bagian paling penting:
+  reveal produk jadi + CTA) sama sekali tanpa suara. Root cause: TTS Canva membaca naskah lebih cepat
+  dari estimasi kata/menit yang dipakai saat menyusun naskah.
+- FIX yang dieksekusi (tanpa TTS baru, cuma pakai audio yang sudah ada): audio asli (27.3s) di
+  TIME-STRETCH (diperlambat) pakai `atempo=0.605` sampai pas mengisi penuh 45.1s -- pitch suara tetap
+  terjaga (atempo preserve pitch, beda dari sekadar ubah sample rate). Solusi ini SEMENTARA DITOLAK user
+  (dianggap kedengeran gak natural/gak nyambung) -- user pilih JALAN TERUS TANPA voice-over AI, ganti
+  fokus ke caption teks lengkap saja.
+
+**Keputusan final:** video dipost TANPA voice-over AI (audio asli suara mesin jahit/bordir dari rekaman
+apa adanya). Caption Instagram dibuat lengkap dengan SEO/GEO keyword ganda target (calon klien jasa jahit
+DAN calon tenant platform), CTA dengan kontak lengkap (WA, email, lokasi Garut, link bio).
+
+**Status: DIPOST.** File final ada di riwayat chat sesi ini (tidak disimpan ke repo -- video/foto bukan
+bagian dari codebase).
+
+**Next steps aktif ditambah:**
+[ ] Kalau ke depan mau coba voice-over AI lagi: pastikan hitung dulu berapa lama TTS akan bicara SEBELUM
+    generate (atau generate dulu, cek durasi asli, baru sesuaikan panjang video/segmen ke situ -- bukan
+    sebaliknya)
+[ ] Pertimbangkan cari cara isolasi elemen audio Canva lewat tools lain kalau butuh edit audio timing
+    lagi di masa depan (tools Canva MCP saat ini tidak cukup)
